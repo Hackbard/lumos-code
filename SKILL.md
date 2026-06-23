@@ -51,6 +51,14 @@ Analysiere den Output (`affected` pro Tiefe).
 
 Du bist verpflichtet, alle Methoden in Depth 1 (direkte Aufrufer) an deine Änderung anzupassen. Ignoriere diese Warnungen niemals.
 
+Planungs-Disziplin — groß zuerst, dann klein: Beim Planen/Refactoring holst du
+ZUERST die große, genaue Joern-Sicht (`--engine joern`), um den vollständigen
+Blast-Radius zu sehen. DAZWISCHEN, bei den schnellen iterativen Checks während
+der Umsetzung, nutzt du den Default tree-sitter (`--engine treesitter`,
+instant). Also:
+  • Planen/erstmalige Impact-Analyse: `lmc impact <m> --engine joern --depth 3 --json`
+  • Wiederholte Kontroll-Checks beim Coden: `lmc callers/callees/impact <m> --json` (Default = treesitter)
+
 Für Data-Flow/Taint-Tiefe: `lmc query "<CPGQL>" --path <worktree> --json` (Joern).
 
 4. Precommit-Check
@@ -87,7 +95,7 @@ Setup:
 - `lmc build --path <w> --json` — tree-sitter-Index + Joern-CPG bauen.
 - `lmc status --path <w> --json` — Gateway- + Joern-Status + CPG-Frische.
 
-Navigation (instant, tree-sitter):
+Navigation (Default tree-sitter = instant; `--engine joern` fuer die genaue Joern-Sicht):
 - `lmc find <pattern> --path <w> --json` — Klassen/Methoden per Regex finden.
 - `lmc callers <Class.method|name> --path <w> --json` — direkte Aufrufer.
 - `lmc callees <Class.method|name> --path <w> --json` — was wird aufgerufen.

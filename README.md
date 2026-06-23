@@ -98,15 +98,19 @@ Auto-Auflösung aus `--path`). Für Agenten immer `--json`.
 | `lmc build --path <w> --json` | tree-sitter-Index + Joern-CPG bauen (`<hash>.bin`) |
 | `lmc status --path <w> --json` | Gateway- + Joern-Status + CPG-Frische |
 
-### Navigation (tree-sitter, instant)
+### Navigation (tree-sitter = instant; `--engine joern` = genaue Joern-Antwort)
 | Befehl | Zweck |
 |---|---|
-| `lmc find <pattern> --path <w> --json` | Klassen/Methoden per Regex finden |
-| `lmc callers <m> --path <w> --json` | Wer ruft diese Methode auf? |
-| `lmc callees <m> --path <w> --json` | Was ruft diese Methode auf? |
-| `lmc source <m> --path <w> --json` | Quelltext + Datei:Zeile |
-| `lmc context <m> --path <w> --json` | Caller + Callee + Source gebündelt |
-| `lmc impact <m> --path <w> --depth N --json` | Blast-Radius (rekursiv) |
+| `lmc find <pattern> --path <w> [--engine joern] --json` | Klassen/Methoden per Regex finden |
+| `lmc callers <m> --path <w> [--engine joern] --json` | Wer ruft diese Methode auf? |
+| `lmc callees <m> --path <w> [--engine joern] --json` | Was ruft diese Methode auf? |
+| `lmc source <m> --path <w> [--engine joern] --json` | Quelltext + Datei:Zeile |
+| `lmc context <m> --path <w> [--engine joern] --json` | Caller + Callee + Source gebündelt |
+| `lmc impact <m> --path <w> --depth N [--engine joern] --json` | Blast-Radius (rekursiv) |
+
+**Planungs-Disziplin:** Beim Planen/Refactoring zuerst `--engine joern` (große,
+genaue Sicht, langsam), danach den Default tree-sitter für die schnellen
+iterativen Checks beim Coden.
 
 ### Analyse / Guardrails
 | Befehl | Zweck |

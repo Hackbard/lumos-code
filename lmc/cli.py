@@ -178,14 +178,21 @@ def status(
 
 # --- Navigation ---
 
+ENGINE_OPT = lambda: typer.Option("treesitter", "--engine",
+    help="joern = genaue Joern-Antwort (langsam); treesitter = instant (Default)")
+
+
 @app.command()
 def find(
     pattern: str = typer.Argument(..., help="Name oder Regex fuer Klassen/Methoden"),
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    engine: str = ENGINE_OPT(),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Klassen/Methoden per Name oder Regex finden (lmc find)."""
-    result = _client().find_methods(_hash_for(path), pattern)
+    cbh = _hash_for(path)
+    result = (joern_mod.nav_find(cbh, pattern, url=_G.get("url"))
+             if engine == "joern" else _client().find_methods(cbh, pattern))
     _emit(result, as_json)
 
 
@@ -193,10 +200,14 @@ def find(
 def callers(
     method: str = typer.Argument(..., help="Methoden-Spec (Class.method oder name)"),
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    engine: str = ENGINE_OPT(),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Wer ruft diese Methode auf? (lmc callers)"""
-    result = _client().get_call_graph(_hash_for(path), method, direction="incoming", depth=1)
+    cbh = _hash_for(path)
+    result = (joern_mod.nav_callers(cbh, method, url=_G.get("url"))
+             if engine == "joern"
+             else _client().get_call_graph(cbh, method, direction="incoming", depth=1))
     _emit(result, as_json)
 
 
@@ -204,10 +215,14 @@ def callers(
 def callees(
     method: str = typer.Argument(..., help="Methoden-Spec (Class.method oder name)"),
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    engine: str = ENGINE_OPT(),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Was ruft diese Methode auf? (lmc callees)"""
-    result = _client().get_call_graph(_hash_for(path), method, direction="outgoing", depth=1)
+    cbh = _hash_for(path)
+    result = (joern_mod.nav_callees(cbh, method, url=_G.get("url"))
+             if engine == "joern"
+             else _client().get_call_graph(cbh, method, direction="outgoing", depth=1))
     _emit(result, as_json)
 
 
@@ -215,10 +230,13 @@ def callees(
 def source(
     method: str = typer.Argument(..., help="Methoden-Spec (Class.method oder name)"),
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    engine: str = ENGINE_OPT(),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Quelltext + Datei:Zeile einer Methode (lmc source)."""
-    result = _client().get_source(_hash_for(path), method)
+    cbh = _hash_for(path)
+    result = (joern_mod.nav_source(cbh, method, url=_G.get("url"))
+             if engine == "joern" else _client().get_source(cbh, method))
     _emit(result, as_json)
 
 
@@ -226,10 +244,13 @@ def source(
 def context(
     symbol: str = typer.Argument(..., help="Symbol-Spec (Class.method oder name)"),
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    engine: str = ENGINE_OPT(),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Caller + Callee + Source gebündelt (lmc context)."""
-    result = _client().get_context(_hash_for(path), symbol)
+    cbh = _hash_for(path)
+    result = (joern_mod.nav_context(cbh, symbol, url=_G.get("url"))
+             if engine == "joern" else _client().get_context(cbh, symbol))
     _emit(result, as_json)
 
 
@@ -240,12 +261,16 @@ def impact(
     method: str = typer.Argument(..., help="Methoden-Spec (Class.method oder name)"),
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     depth: int = typer.Option(3, "--depth", help="Ebenen fuer den Blast-Radius"),
+    engine: str = ENGINE_OPT(),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Blast-Radius: wer ist betroffen, wenn diese Methode geändert wird? (lmc impact)"""
     if not as_json:
-        console.print(f"[bold red]⚠️ IMPACT[/bold red] für [bold]{method}[/bold] [dim](depth={depth})[/dim]\n")
-    result = _client().get_call_graph(_hash_for(path), method, direction="incoming", depth=depth)
+        console.print(f"[bold red]⚠️ IMPACT[/bold red] für [bold]{method}[/bold] [dim](depth={depth}, engine={engine})[/dim]\n")
+    cbh = _hash_for(path)
+    result = (joern_mod.nav_impact(cbh, method, depth, url=_G.get("url"))
+             if engine == "joern"
+             else _client().get_call_graph(cbh, method, direction="incoming", depth=depth))
     if not as_json and result.get("success"):
         affected = result.get("data", {}).get("affected", {})
         table = Table(show_header=True, header_style="bold magenta")
