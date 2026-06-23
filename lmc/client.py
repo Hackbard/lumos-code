@@ -1,75 +1,66 @@
+"""Schlanker HTTP-Client fuer den Lumos CPG-Server (JSON-RPC tools/call)."""
+from __future__ import annotations
+
 import json
-import httpx
 from typing import Any, Dict, Optional
 
-class CodebadgerClient:
-    """
-    Ein komplett neu geschriebener, schlanker Client für die Kommunikation 
-    mit dem lokalen Codebadger MCP-Server. Keine Altlasten.
-    """
-    def __init__(self, base_url: str = "http://localhost:4242/mcp"):
-        self.base_url = base_url
-        self.client = httpx.Client(timeout=120.0) # Lange Timeouts für Joern-Builds
+import httpx
 
-    def _call_mcp_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Nativer HTTP-Aufruf an den MCP Server. 
-        Ersetzt die alte Gibson cpg.py Logik.
-        """
+from .server.app import DEFAULT_HOST, DEFAULT_PORT
+
+
+def default_url() -> str:
+    import os
+    host = os.environ.get("LUMOS_HOST", DEFAULT_HOST)
+    port = int(os.environ.get("LUMOS_PORT", DEFAULT_PORT))
+    return f"http://{host}:{port}/mcp"
+
+
+class CodebadgerClient:
+    def __init__(self, base_url: str | None = None, timeout: float = 120.0):
+        self.base_url = base_url or default_url()
+        self.client = httpx.Client(timeout=timeout)
+
+    def _call(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments
-            }
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
         }
-        
         try:
-            response = self.client.post(self.base_url, json=payload)
-            response.raise_for_status()
-            result = response.json().get("result", {})
-            
-            # MCP gibt Content als Liste von Text/JSON Blöcken zurück
-            content = result.get("content", [])
+            r = self.client.post(self.base_url, json=payload)
+            r.raise_for_status()
+            content = r.json().get("result", {}).get("content", [])
             if content and content[0].get("type") == "text":
-                text_data = content[0].get("text", "{}")
-                return json.loads(text_data)
-            return {"success": False, "error": "Unerwartetes MCP Antwortformat"}
-            
+                return json.loads(content[0].get("text", "{}"))
+            return {"success": False, "error": "Unerwartetes MCP-Antwortformat"}
+        except httpx.ConnectError:
+            return {"success": False, "error": "CPG-Server nicht erreichbar. Erst 'lmc up' ausfuehren."}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    # --- Die Kern-Methoden für Lumos Code ---
+    # --- Kern-Methoden ---
 
-    def generate_cpg(self, source_path: str, language: str) -> Dict[str, Any]:
-        """Baut den CPG für einen spezifischen Pfad."""
-        return self._call_mcp_tool("generate_cpg", {
-            "source_type": "local",
-            "source_path": source_path,
-            "language": language,
-            "force": True
-        })
+    def generate_cpg(self, source_path: str, language: str, codebase_hash: Optional[str] = None) -> Dict[str, Any]:
+        args = {"source_path": source_path, "language": language}
+        if codebase_hash:
+            args["codebase_hash"] = codebase_hash
+        return self._call("generate_cpg", args)
 
-    def get_status(self, codebase_hash: str) -> Dict[str, Any]:
-        """Fragt den Status eines CPGs ab."""
-        return self._call_mcp_tool("get_cpg_status", {
-            "codebase_hash": codebase_hash
-        })
+    def get_cpg_status(self, codebase_hash: str) -> Dict[str, Any]:
+        return self._call("get_cpg_status", {"codebase_hash": codebase_hash})
+
+    def find_methods(self, codebase_hash: str, pattern: str) -> Dict[str, Any]:
+        return self._call("find_methods", {"codebase_hash": codebase_hash, "pattern": pattern})
+
+    def get_call_graph(self, codebase_hash: str, method: str, direction: str, depth: int) -> Dict[str, Any]:
+        return self._call("get_call_graph", {"codebase_hash": codebase_hash, "method_name": method,
+                                             "direction": direction, "depth": depth})
+
+    def get_source(self, codebase_hash: str, method: str) -> Dict[str, Any]:
+        return self._call("get_source", {"codebase_hash": codebase_hash, "method_name": method})
+
+    def get_context(self, codebase_hash: str, symbol: str) -> Dict[str, Any]:
+        return self._call("get_context", {"codebase_hash": codebase_hash, "symbol": symbol})
 
     def run_query(self, codebase_hash: str, query: str) -> Dict[str, Any]:
-        """Führt eine rohe CPGQL Abfrage aus."""
-        return self._call_mcp_tool("run_cpgql_query", {
-            "codebase_hash": codebase_hash,
-            "query": query
-        })
-        
-    def get_call_graph(self, codebase_hash: str, method_name: str, direction: str, depth: int) -> Dict[str, Any]:
-        """Holt den Call-Graph (für Impact und Caller/Callee)."""
-        return self._call_mcp_tool("get_call_graph", {
-            "codebase_hash": codebase_hash,
-            "method_name": method_name,
-            "direction": direction,
-            "depth": depth
-        })
+        return self._call("run_cpgql_query", {"codebase_hash": codebase_hash, "query": query})
