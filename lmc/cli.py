@@ -12,6 +12,7 @@ from .config import (
 )
 from .server import lifecycle
 from .server.lifecycle import is_running, start_server, stop_server
+from . import joern as joern_mod
 
 app = typer.Typer(
     name="lmc",
@@ -77,14 +78,14 @@ def up(
     url: str = typer.Option(None, "--url", help="URL, auf der der Server laufen soll"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Startet den lokalen CPG-Server (cpg up)."""
+    """Startet den lokalen CPG-Server (lmc up)."""
     result = start_server(url)
     _emit(result, as_json)
 
 
 @app.command()
 def down(as_json: bool = typer.Option(False, "--json")):
-    """Stoppt den lokalen CPG-Server (cpg down)."""
+    """Stoppt den lokalen CPG-Server (lmc down)."""
     _emit(stop_server(), as_json)
 
 
@@ -131,7 +132,7 @@ def build(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Baut den CPG für den aktuellen Worktree (cpg build)."""
+    """Baut den CPG für den aktuellen Worktree (lmc build)."""
     try:
         language, quelle = _lang_from(path)
     except Exception as e:
@@ -142,8 +143,11 @@ def build(
         console.print(f"[bold blue]Baue CPG für {path}[/bold blue] "
                       f"[dim](Sprache: {language} via {quelle}, hash: {cbh})[/dim]")
     result = _client().generate_cpg(source_path=str(Path(path).resolve()), language=language, codebase_hash=cbh)
+    # Joern-CPG (<hash>.bin) im Volume — best-effort; nav laeuft ohnehin auf tree-sitter.
+    joern_res = joern_mod.joern_parse(str(Path(path).resolve()), cbh)
     if isinstance(result, dict) and result.get("success"):
-        result["data"] = {**(result.get("data") or {}), "codebase_hash": cbh, "language": language}
+        result["data"] = {**(result.get("data") or {}), "codebase_hash": cbh,
+                          "language": language, "joern": joern_res}
     _emit(result, as_json)
 
 
@@ -152,20 +156,23 @@ def status(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Server-Status + CPG-Frische des Worktrees (cpg status)."""
+    """Server-Status + CPG-Frische des Worktrees (lmc status)."""
     cbh = _hash_for(path)
     server_up = is_running(_G.get("url"))
+    joern_up = joern_mod.JoernClient().is_up()
     try:
         language, quelle = _lang_from(path)
     except Exception:
         language, quelle = None, None
     result = _client().get_cpg_status(cbh)
     data = result.get("data") or {}
+    base = {"gateway_up": server_up, "joern_up": joern_up,
+            "codebase_hash": cbh, "language": language}
     if not data.get("exists"):
-        data = {"server_up": server_up, "codebase_hash": cbh, "language": language,
-                "cpg_built": False, "hinweis": "Kein CPG gebaut — 'lmc build --path <p>' ausfuehren."}
+        data = {**base, "cpg_built": False,
+                "hinweis": "Kein CPG gebaut — 'lmc build --path <p>' ausfuehren."}
     else:
-        data = {"server_up": server_up, "codebase_hash": cbh, "language": language, "cpg_built": True, **data}
+        data = {**base, "cpg_built": True, **data}
     _emit({"success": result.get("success", True), "data": data}, as_json)
 
 
@@ -177,7 +184,7 @@ def find(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Klassen/Methoden per Name oder Regex finden (cpg find)."""
+    """Klassen/Methoden per Name oder Regex finden (lmc find)."""
     result = _client().find_methods(_hash_for(path), pattern)
     _emit(result, as_json)
 
@@ -188,7 +195,7 @@ def callers(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Wer ruft diese Methode auf? (cpg callers)"""
+    """Wer ruft diese Methode auf? (lmc callers)"""
     result = _client().get_call_graph(_hash_for(path), method, direction="incoming", depth=1)
     _emit(result, as_json)
 
@@ -199,7 +206,7 @@ def callees(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Was ruft diese Methode auf? (cpg callees)"""
+    """Was ruft diese Methode auf? (lmc callees)"""
     result = _client().get_call_graph(_hash_for(path), method, direction="outgoing", depth=1)
     _emit(result, as_json)
 
@@ -210,7 +217,7 @@ def source(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Quelltext + Datei:Zeile einer Methode (cpg source)."""
+    """Quelltext + Datei:Zeile einer Methode (lmc source)."""
     result = _client().get_source(_hash_for(path), method)
     _emit(result, as_json)
 
@@ -221,7 +228,7 @@ def context(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Caller + Callee + Source gebündelt (cpg context)."""
+    """Caller + Callee + Source gebündelt (lmc context)."""
     result = _client().get_context(_hash_for(path), symbol)
     _emit(result, as_json)
 
@@ -235,7 +242,7 @@ def impact(
     depth: int = typer.Option(3, "--depth", help="Ebenen fuer den Blast-Radius"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Blast-Radius: wer ist betroffen, wenn diese Methode geändert wird? (cpg impact)"""
+    """Blast-Radius: wer ist betroffen, wenn diese Methode geändert wird? (lmc impact)"""
     if not as_json:
         console.print(f"[bold red]⚠️ IMPACT[/bold red] für [bold]{method}[/bold] [dim](depth={depth})[/dim]\n")
     result = _client().get_call_graph(_hash_for(path), method, direction="incoming", depth=depth)
@@ -256,7 +263,7 @@ def check_diff(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Mappt uncommittetes git diff auf den CPG (cpg check-diff / Precommit)."""
+    """Mappt uncommittetes git diff auf den CPG (lmc check-diff / Precommit)."""
     root = Path(path).resolve()
     changed: list = []
     try:
@@ -312,7 +319,7 @@ def precommit(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Alias für check-diff (cpg precommit)."""
+    """Alias für check-diff (lmc precommit)."""
     check_diff(path=path, as_json=as_json)
 
 
@@ -324,8 +331,9 @@ def query(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Roher Joern/CPGQL-Escape-Hatch (cpg query). Braucht Joern-Backend."""
-    _emit(_client().run_query(_hash_for(path), cpgql), as_json)
+    """Roher Joern/CPGQL-Escape-Hatch gegen das Joern-Backend (lmc query)."""
+    result = joern_mod.run_cpgql(_hash_for(path), cpgql, url=_G.get("url"))
+    _emit(result, as_json)
 
 
 if __name__ == "__main__":

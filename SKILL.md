@@ -3,21 +3,25 @@ Lumos Code (lmc) - Core Skill & Guardrails
 Du hast Zugriff auf das CLI-Tool lmc (Lumos Code). Es ist dein primäres Werkzeug, um den Code Property Graph (CPG) des Projekts abzufragen.
 Regel #1: Rate niemals bei strukturellen Fragen (z.B. "Wer ruft Methode X auf?"). Nutze IMMER lmc.
 
-lmc bringt seinen eigenen CPG-Server mit (tree-sitter-basiert, polyglot). Du musst
-keinen externen Server voraussetzen — `lmc up` startet ihn lokal auf Port 4243.
-Unterstützte Sprachen: c, cpp, csharp, go, java, javascript, kotlin, php, python,
-ruby, scala, swift, typescript.
+lmc bringt beide Backends selbst mit: das Joern-Backend (Docker, echtes CPGQL /
+Data-Flow) und einen tree-sitter-Gateway (polyglot, instant Navigation).
+`lmc up` startet beide, `lmc down` stoppt beide.
 
-Grenzen (ehrlich): Call-Graph-Ebene (callers/callees/impact) — keine dynamische
-Dispatch-Analyse, kein Data-Flow/Taint. Für rohes CPGQL/Data-Flow bräuchte es
-das Joern-Backend (nicht angebunden; `lmc query` meldet das ehrlich).
+Unterstützte Sprachen: c, cpp, csharp, go, java, javascript, kotlin, php,
+python, ruby, scala, swift, typescript.
 
-1. Server-Lifecycle
+Zweigleisig (ehrlich):
+- Navigation (find/callers/callees/impact/source/context) → tree-sitter,
+  namensbasiert, instant. Keine dynamische Dispatch-Analyse.
+- `lmc query "<CPGQL>"` → echtes Joern-CPGQL (Data-Flow/Taint) gegen den CPG.
 
-`lmc up` — startet den lokalen CPG-Server (Hintergrund, PID in ~/.cache/lumos/).
-`lmc down` — stoppt ihn.
-`lmc serve` — Vordergrund (Debug).
-Der Server läuft auf 127.0.0.1:4243 (Default). Port via `LUMOS_PORT`-Env oder `--url`.
+1. Backend-Lifecycle
+
+`lmc up` — baut einmalig das Joern-Image (lmc-joern:latest aus docker/Dockerfile),
+startet den Joern-Container (REST 8085) + den Gateway (4243).
+`lmc down` — stoppt beide (Volume lmc-cpgs + CPGs bleiben erhalten).
+`lmc serve` — Gateway im Vordergrund (Debug).
+Braucht Docker. Joern-Port via `LUMOS_JOERN_PORT`, Gateway-Port via `LUMOS_PORT`.
 
 2. Worktree & Context Management (DEINE Aufgabe)
 
@@ -35,7 +39,7 @@ codebase_hash: 288e619dc73cb69d
 
 Du musst dem CLI immer den Kontext mitgeben, wenn du in Monorepos oder Unterordnern arbeitest (z.B. `--path ./backend`).
 
-Frische-Disziplin: Wenn du neue Dateien anlegst oder Methoden hinzufügst, bist DU verantwortlich, den Graphen via `lmc build --path . --json` aufzufrischen.
+Frische-Disziplin: Wenn du neue Dateien anlegst oder Methoden hinzufügst, bist DU verantwortlich, den Graphen via `lmc build --path . --json` aufzufrischen (baut tree-sitter-Index + Joern-CPG).
 
 3. Refactoring & Impact-Pflicht (Blast Radius)
 
@@ -46,6 +50,8 @@ Führe aus: `lmc impact <Class.method|name> --path <worktree> --depth 3 --json`
 Analysiere den Output (`affected` pro Tiefe).
 
 Du bist verpflichtet, alle Methoden in Depth 1 (direkte Aufrufer) an deine Änderung anzupassen. Ignoriere diese Warnungen niemals.
+
+Für Data-Flow/Taint-Tiefe: `lmc query "<CPGQL>" --path <worktree> --json` (Joern).
 
 4. Precommit-Check
 
@@ -69,30 +75,30 @@ Führe `lmc impact` auf diesem Controller aus, um sicherzustellen, dass das Back
 
 CLI Befehls-Übersicht für Agenten
 
-Nutze IMMER den `--json` Flag für maschinenlesbaren Output! Jeder Befehl nimmt `--path <worktree>` (Default `.`). Globale Flags für alle Befehle: `--url <server>` und `--hash <cpg>` (sonst Auto-Auflösung aus `--path`).
+Nutze IMMER den `--json` Flag für maschinenlesbaren Output! Jeder Befehl nimmt `--path <worktree>` (Default `.`). Globale Flags für alle Befehle: `--url <gateway>` und `--hash <cpg>` (sonst Auto-Auflösung aus `--path`).
 
 Lifecycle:
-- `lmc up [--url]` — CPG-Server starten.
-- `lmc down` — CPG-Server stoppen.
-- `lmc serve [--host] [--port]` — Server im Vordergrund.
+- `lmc up` — Joern-Image + Joern-Container (8085) + Gateway (4243) starten.
+- `lmc down` — beide stoppen.
+- `lmc serve [--host] [--port]` — Gateway im Vordergrund.
 
 Setup:
 - `lmc init --auto --path <w> --json` — Sprache erkennen + `lumos.yml` schreiben.
-- `lmc build --path <w> --json` — CPG bauen/aktualisieren (Sprache aus `lumos.yml`).
-- `lmc status --path <w> --json` — Server-Status + CPG-Frische.
+- `lmc build --path <w> --json` — tree-sitter-Index + Joern-CPG bauen.
+- `lmc status --path <w> --json` — Gateway- + Joern-Status + CPG-Frische.
 
-Navigation:
+Navigation (instant, tree-sitter):
 - `lmc find <pattern> --path <w> --json` — Klassen/Methoden per Regex finden.
 - `lmc callers <Class.method|name> --path <w> --json` — direkte Aufrufer.
 - `lmc callees <Class.method|name> --path <w> --json` — was wird aufgerufen.
 - `lmc source <Class.method|name> --path <w> --json` — Quelltext + Datei:Zeile.
-- `lmc context <Class.method|name> --path <w> --json` — Caller + Callee + Source gebündelt.
+- `lmc context <Class.method|name> --path <w> --json` — Caller + Callee + Source.
 
 Analyse:
 - `lmc impact <m> --path <w> --depth 3 --json` — Blast-Radius.
 - `lmc check-diff --path <w> --json` / `lmc precommit` — Precommit-Guardrail.
 
-Escape-Hatch:
-- `lmc query "<CPGQL>" --path <w> --json` — rohe Joern/CPGQL-Abfrage (braucht Joern-Backend; ehrlicher Error ohne).
+Escape-Hatch (echtes Joern-CPGQL):
+- `lmc query "<CPGQL>" --path <w> --json` — rohe Joern/CPGQL-Abfrage (Data-Flow/Taint).
 
-Bibliotheks-API (importierbar, ohne CLI): `lmc.server.cpg` (build_index/Index mit find/callers/callees/source/impact), `lmc.server.store`, `lmc.server.app` (Starlette-App), `lmc.server.lifecycle`.
+Bibliotheks-API (importierbar, ohne CLI): `lmc.server.graph` (build_index/Index mit find/callers/callees/source/impact), `lmc.server.store`, `lmc.server.app` (Gateway), `lmc.server.lifecycle` (up/down), `lmc.joern` (Joern-REST + parse), `lmc.config`.

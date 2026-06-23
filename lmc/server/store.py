@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import Dict, Optional
 
-from .cpg import Index, build_index
+from .graph import Index, build_index
 
 _STORE: Dict[str, dict] = {}  # hash -> {"index": Index, "language": str, "built_at": float}
 

@@ -17,7 +17,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import store
-from .cpg import Index
+from .graph import Index
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 4243  # eigen: getrennt vom externen Codebadger-Server (4242)
@@ -137,12 +137,12 @@ def tool_get_context(args: dict) -> str:
 
 
 def tool_run_cpgql_query(args: dict) -> str:
-    # ponytail: rohes Joern-CPGQL braucht den Scala-Joern-Backend; der
-    # tree-sitter-Server kann nur strukturelle Fragen. Ehrlicher Error statt Fake.
-    return _err(
-        "Rohe CPGQL-Abfragen benoetigen das Joern-Backend (nicht angebunden). "
-        "Nutze 'lmc find/callers/callees/source/context/impact' fuer strukturelle Fragen."
-    )
+    # Reicht CPGQL an das Joern-Backend weiter (echte Ausfuehrung, kein Mock).
+    from ..joern import run_cpgql
+    result = run_cpgql(args.get("codebase_hash", ""), args.get("query", ""))
+    if result.get("success"):
+        return _ok({"stdout": result.get("stdout", ""), "engine": "joern"})
+    return _err(result.get("error", "Joern-Fehler"))
 
 
 TOOLS: Dict[str, Callable[[dict], str]] = {

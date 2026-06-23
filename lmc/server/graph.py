@@ -360,4 +360,4 @@ if __name__ == "__main__":
         idx2 = build_index("h2", "python", d)
         assert sorted(m.signature for m in idx2.methods) == ["bar", "foo"]
         assert [m.signature for m in idx2.callers("bar")] == ["foo"]
-    print("cpg.py self-check OK; php methods:", sigs)
+    print("graph.py self-check OK; php methods:", sigs)
