@@ -45,19 +45,19 @@ Frische-Disziplin: Wenn du neue Dateien anlegst oder Methoden hinzufügst, bist 
 
 Bevor du die Signatur (Parameter, Rückgabewerte) oder Kernlogik einer bestehenden, systemweit genutzten Methode änderst:
 
-Führe aus: `lmc impact <Class.method|name> --path <worktree> --depth 3 --json`
+Führe aus: `lmc impact <Class.method|name> --path <worktree> --depth 3 --engine joern --json`
 
 Analysiere den Output (`affected` pro Tiefe).
 
 Du bist verpflichtet, alle Methoden in Depth 1 (direkte Aufrufer) an deine Änderung anzupassen. Ignoriere diese Warnungen niemals.
 
-Planungs-Disziplin — groß zuerst, dann klein: Beim Planen/Refactoring holst du
-ZUERST die große, genaue Joern-Sicht (`--engine joern`), um den vollständigen
-Blast-Radius zu sehen. DAZWISCHEN, bei den schnellen iterativen Checks während
-der Umsetzung, nutzt du den Default tree-sitter (`--engine treesitter`,
-instant). Also:
-  • Planen/erstmalige Impact-Analyse: `lmc impact <m> --engine joern --depth 3 --json`
-  • Wiederholte Kontroll-Checks beim Coden: `lmc callers/callees/impact <m> --json` (Default = treesitter)
+Engine-Wahl — groß zuerst, dann klein: Die Impact-Pflicht (Planen/erstmalige
+Analyse) läuft mit `--engine joern` (genau, mit Typ-Auflösung — die vollständige
+Sicht). Für die schnellen iterativen Kontroll-Checks WÄHREND des Codens nimm den
+Default tree-sitter (instant, ohne `--engine`):
+  • Pflicht/Planung: `lmc impact <m> --engine joern --depth 3 --json`
+  • Schnelle Wiederholungs-Checks: `lmc callers/callees/impact <m> --json` (Default = treesitter)
+  • Genaue Einzel-Auskünfte auf Knopfdruck: `… --engine joern` auf jedem Nav-Befehl
 
 Für Data-Flow/Taint-Tiefe: `lmc query "<CPGQL>" --path <worktree> --json` (Joern).
 
@@ -95,18 +95,21 @@ Setup:
 - `lmc build --path <w> [--scope sub] --json` — tree-sitter-Index + Joern-CPG bauen (--scope fuer Teilbaeume).
 - `lmc status --path <w> --json` — Gateway- + Joern-Status + CPG-Frische.
 
-Navigation (Default tree-sitter = instant; `--engine joern` fuer die genaue Joern-Sicht):
-- `lmc find <pattern> --path <w> --json` — Klassen/Methoden per Regex finden.
-- `lmc callers <Class.method|name> --path <w> --json` — direkte Aufrufer.
-- `lmc callees <Class.method|name> --path <w> --json` — was wird aufgerufen.
-- `lmc source <Class.method|name> --path <w> --json` — Quelltext + Datei:Zeile.
-- `lmc context <Class.method|name> --path <w> --json` — Caller + Callee + Source.
-- `lmc methods-of <Class> --path <w> --json` — alle Methoden einer Klasse.
-- `lmc callees-of-class <Class> --path <w> --json` — alle von einer Klasse aufgerufenen Methoden.
+Navigation (Default tree-sitter = instant; `--engine joern` = genaue Joern-Sicht):
+- `lmc find <pattern> --path <w> [--engine joern] --json` — Klassen/Methoden per Regex finden.
+- `lmc callers <Class.method|name> --path <w> [--engine joern] --json` — direkte Aufrufer.
+- `lmc callees <Class.method|name> --path <w> [--engine joern] --json` — was wird aufgerufen.
+- `lmc source <Class.method|name> --path <w> [--engine joern] --json` — Quelltext + Datei:Zeile.
+- `lmc context <Class.method|name> --path <w> [--engine joern] --json` — Caller + Callee + Source.
+- `lmc methods-of <Class> --path <w> [--engine joern] --json` — alle Methoden einer Klasse.
+- `lmc callees-of-class <Class> --path <w> [--engine joern] --json` — alle von einer Klasse aufgerufenen Methoden.
 
 Analyse:
-- `lmc impact <m> --path <w> --depth 3 --json` — Blast-Radius.
+- `lmc impact <m> --path <w> --depth 3 --engine joern --json` — Blast-Radius (Pflicht: joern).
 - `lmc check-diff --path <w> --json` / `lmc precommit` — Precommit-Guardrail.
+
+Teilbaeume (große Codebases / Monorepo-Unterverzeichnis):
+- `lmc build --path <w> --scope <sub> --json` — baut nur den Teilbaum (overrideert den Hash-CPG; danach fuer diesen Hash gueltig).
 
 Escape-Hatch (echtes Joern-CPGQL):
 - `lmc query "<CPGQL>" --path <w> --json` — rohe Joern/CPGQL-Abfrage (Data-Flow/Taint).
