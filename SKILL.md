@@ -92,7 +92,7 @@ Lifecycle:
 
 Setup:
 - `lmc init --auto --path <w> --json` — Sprache erkennen + `lumos.yml` schreiben.
-- `lmc build --path <w> --json` — tree-sitter-Index + Joern-CPG bauen.
+- `lmc build --path <w> [--scope sub] --json` — tree-sitter-Index + Joern-CPG bauen (--scope fuer Teilbaeume).
 - `lmc status --path <w> --json` — Gateway- + Joern-Status + CPG-Frische.
 
 Navigation (Default tree-sitter = instant; `--engine joern` fuer die genaue Joern-Sicht):
@@ -101,6 +101,8 @@ Navigation (Default tree-sitter = instant; `--engine joern` fuer die genaue Joer
 - `lmc callees <Class.method|name> --path <w> --json` — was wird aufgerufen.
 - `lmc source <Class.method|name> --path <w> --json` — Quelltext + Datei:Zeile.
 - `lmc context <Class.method|name> --path <w> --json` — Caller + Callee + Source.
+- `lmc methods-of <Class> --path <w> --json` — alle Methoden einer Klasse.
+- `lmc callees-of-class <Class> --path <w> --json` — alle von einer Klasse aufgerufenen Methoden.
 
 Analyse:
 - `lmc impact <m> --path <w> --depth 3 --json` — Blast-Radius.
@@ -109,4 +111,4 @@ Analyse:
 Escape-Hatch (echtes Joern-CPGQL):
 - `lmc query "<CPGQL>" --path <w> --json` — rohe Joern/CPGQL-Abfrage (Data-Flow/Taint).
 
-Bibliotheks-API (importierbar, ohne CLI): `lmc.server.graph` (build_index/Index mit find/callers/callees/source/impact), `lmc.server.store`, `lmc.server.app` (Gateway), `lmc.server.lifecycle` (up/down), `lmc.joern` (Joern-REST + parse), `lmc.config`.
+Bibliotheks-API (importierbar, ohne CLI): `lmc.server.graph` (build_index/Index mit find/callers/callees/source/context/impact/methods_of/callees_of_class), `lmc.server.store`, `lmc.server.app` (Gateway), `lmc.server.lifecycle` (up/down), `lmc.joern` (Joern-REST + parse + nav_*), `lmc.diff` (check_diff als Funktion), `lmc.worktree` (State-Registry), `lmc.config`.

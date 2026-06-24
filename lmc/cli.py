@@ -1,5 +1,5 @@
 import json
-import subprocess
+import re
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -13,6 +13,8 @@ from .config import (
 from .server import lifecycle
 from .server.lifecycle import is_running, start_server, stop_server
 from . import joern as joern_mod
+from . import worktree
+from . import diff as diff_mod
 
 app = typer.Typer(
     name="lmc",
@@ -130,24 +132,30 @@ def init(
 @app.command()
 def build(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    scope: str = typer.Option(None, "--scope", help="Teilbaum (relativer Pfad im Worktree) statt ganzer Tree"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Baut den CPG für den aktuellen Worktree (lmc build)."""
+    """Baut den CPG für den aktuellen Worktree (lmc build). --scope für Teilbäume."""
     try:
         language, quelle = _lang_from(path)
     except Exception as e:
         _emit({"success": False, "error": str(e)}, as_json)
         return
     cbh = _hash_for(path)
+    src = str((Path(path) / scope).resolve()) if scope else str(Path(path).resolve())
     if not as_json:
+        scope_note = f", scope={scope}" if scope else ""
         console.print(f"[bold blue]Baue CPG für {path}[/bold blue] "
-                      f"[dim](Sprache: {language} via {quelle}, hash: {cbh})[/dim]")
-    result = _client().generate_cpg(source_path=str(Path(path).resolve()), language=language, codebase_hash=cbh)
+                      f"[dim](Sprache: {language} via {quelle}, hash: {cbh}{scope_note})[/dim]")
+    result = _client().generate_cpg(source_path=src, language=language, codebase_hash=cbh)
     # Joern-CPG (<hash>.bin) im Volume — best-effort; nav laeuft ohnehin auf tree-sitter.
-    joern_res = joern_mod.joern_parse(str(Path(path).resolve()), cbh)
+    joern_res = joern_mod.joern_parse(src, cbh)
     if isinstance(result, dict) and result.get("success"):
+        worktree.register(cbh, path, language,
+                          joern_built=bool(joern_res.get("success")),
+                          joern_bin=joern_res.get("cpg_path"))
         result["data"] = {**(result.get("data") or {}), "codebase_hash": cbh,
-                          "language": language, "joern": joern_res}
+                          "language": language, "scope": scope, "joern": joern_res}
     _emit(result, as_json)
 
 
@@ -289,54 +297,30 @@ def check_diff(
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Mappt uncommittetes git diff auf den CPG (lmc check-diff / Precommit)."""
-    root = Path(path).resolve()
-    changed: list = []
-    try:
-        out = subprocess.run(["git", "diff", "--name-only", "--relative"],
-                             cwd=root, capture_output=True, text=True, check=True)
-        changed = [l for l in out.stdout.splitlines() if l]
-    except subprocess.CalledProcessError as e:
-        _emit({"success": False, "error": f"git diff fehlgeschlagen: {e.stderr or e}"}, as_json)
+    data = diff_mod.check_diff(path, codebase_hash=_G.get("hash"), url=_G.get("url"))
+    if not data.get("success"):
+        _emit(data, as_json)
         return
-    except Exception as e:
-        _emit({"success": False, "error": f"git diff fehlgeschlagen: {e}"}, as_json)
-        return
-    cbh = _hash_for(path)
-    warnings: list = []
-    # ponytail: fuer jede geaenderte Datei schauen wir, ob sie im CPG enthalten ist
-    # und liefern die betroffenen Methoden. Tieferes Symbol-Mapping pro Diff-Hunk
-    # wuerde Joern-Level Differenzierung brauchen (Upgrade-Pfad).
-    st = _client().get_cpg_status(cbh)
-    cpg_built = bool((st.get("data") or {}).get("exists"))
-    if cpg_built and changed:
-        # Methoden in geaenderten Dateien = primaerer Blast-Radius-Kandidat.
-        find_all = _client().find_methods(cbh, ".*")
-        for m in (find_all.get("data") or {}).get("methods", []):
-            if any(m["file"].endswith(c) for c in changed):
-                warnings.append({"file": m["file"], "method": m["signature"], "line": m["line"]})
-    data = {
-        "changed_files": changed,
-        "cpg_built": cpg_built,
-        "warnings": warnings,
-        "status": "safe" if not changed else ("review" if warnings else "clean"),
-    }
     if as_json:
         typer.echo(json.dumps(data, ensure_ascii=False))
-    else:
-        if changed:
-            console.print("[bold blue]Geänderte Dateien:[/bold blue]")
-            for f in changed:
-                console.print(f"  • {f}")
-            if warnings:
-                console.print("[yellow]Betroffene CPG-Methoden:[/yellow]")
-                for w in warnings:
-                    console.print(f"  ⚠ {w['method']}  [dim]({w['file']}:{w['line']})[/dim]")
-            elif cpg_built:
-                console.print("[green]Keine CPG-Methoden in den geänderten Dateien. Commit safe![/green]")
-            else:
-                console.print("[yellow]CPG nicht gebaut — 'lmc build' fuer strukturelles Mapping.[/yellow]")
+        return
+    changed = data["changed_files"]
+    warnings = data["warnings"]
+    cpg_built = data["cpg_built"]
+    if changed:
+        console.print("[bold blue]Geänderte Dateien:[/bold blue]")
+        for f in changed:
+            console.print(f"  • {f}")
+        if warnings:
+            console.print("[yellow]Betroffene CPG-Methoden:[/yellow]")
+            for w in warnings:
+                console.print(f"  ⚠ {w['method']}  [dim]({w['file']}:{w['line']})[/dim]")
+        elif cpg_built:
+            console.print("[green]Keine CPG-Methoden in den geänderten Dateien. Commit safe![/green]")
         else:
-            console.print("[green]Keine uncommitteten Änderungen. Commit safe![/green]")
+            console.print("[yellow]CPG nicht gebaut — 'lmc build' fuer strukturelles Mapping.[/yellow]")
+    else:
+        console.print("[green]Keine uncommitteten Änderungen. Commit safe![/green]")
 
 
 @app.command()
@@ -346,6 +330,61 @@ def precommit(
 ):
     """Alias für check-diff (lmc precommit)."""
     check_diff(path=path, as_json=as_json)
+
+
+@app.command(name="methods-of")
+def methods_of(
+    class_name: str = typer.Argument(..., help="Klassenname (oder FQN)"),
+    path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    engine: str = ENGINE_OPT(),
+    as_json: bool = typer.Option(False, "--json"),
+):
+    """Alle Methoden einer Klasse (lmc methods-of)."""
+    cbh = _hash_for(path)
+    if engine == "joern":
+        last = class_name.replace(chr(92), "/").split("/")[-1]
+        result = joern_mod.nav_find(cbh, f"{re.escape(last)}\\.", url=_G.get("url"))
+    else:
+        result = _client().find_methods(cbh, f"{re.escape(class_name)}\\.")
+    _emit(result, as_json)
+
+
+@app.command(name="callees-of-class")
+def callees_of_class(
+    class_name: str = typer.Argument(..., help="Klassenname (oder FQN)"),
+    path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
+    engine: str = ENGINE_OPT(),
+    as_json: bool = typer.Option(False, "--json"),
+):
+    """Alle von einer Klasse aufgerufenen Methoden (lmc callees-of-class)."""
+    cbh = _hash_for(path)
+    if engine == "joern":
+        last = class_name.replace(chr(92), "/").split("/")[-1]
+        q = (f'cpg.method.fullName(".*{re.escape(last)}\\\\..*").callee.l'
+             f'.map(m => Seq(m.fullName,m.name,m.filename,String.valueOf(m.lineNumber.getOrElse(-1)))'
+             f'.mkString("|")).mkString("\\n")')
+        methods, err = joern_mod._run_methods(cbh, q, url=_G.get("url"))
+        if err.get("error"):
+            _emit(err, as_json)
+            return
+        _emit({"success": True, "data": {"class": class_name,
+            "callees": sorted({m["signature"] for m in methods})}}, as_json)
+    else:
+        # tree-sitter: Methoden der Klasse sammeln, deren Callees vereinigen.
+        st = _client().get_cpg_status(cbh)
+        if not (st.get("data") or {}).get("exists"):
+            _emit({"success": False, "error": "Kein CPG gebaut — 'lmc build' ausfuehren."}, as_json)
+            return
+        # ponytail: tree-sitter-Gateway hat keine callees_of_class; via impact/outgoing
+        # pro Methode approximieren. Für Genauigkeit --engine joern nutzen.
+        result = _client().find_methods(cbh, f"{re.escape(class_name)}\\.")
+        ms = [m["signature"] for m in (result.get("data") or {}).get("methods", [])]
+        callees = set()
+        for sig in ms:
+            cg = _client().get_call_graph(cbh, sig, direction="outgoing", depth=1)
+            for c in (cg.get("data") or {}).get("affected", {}).get("1", []):
+                callees.add(c)
+        _emit({"success": True, "data": {"class": class_name, "callees": sorted(callees)}}, as_json)
 
 
 # --- Escape-Hatch ---

@@ -263,6 +263,21 @@ class Index:
             "source": content[m.start_byte:m.end_byte],
         }
 
+    def methods_of(self, class_name: str) -> List[Method]:
+        """Alle Methoden einer Klasse (Match ueber letzten Segment)."""
+        last = class_name.replace(chr(92), "/").split("/")[-1]
+        return [m for m in self.methods if m.class_last == last]
+
+    def callees_of_class(self, class_name: str) -> List[str]:
+        """Alle von einer Klasse aufgerufenen Methoden-Signaturen (vereinigt)."""
+        out, seen = [], set()
+        for m in self.methods_of(class_name):
+            for c in self.callees(m.signature):
+                if c.signature not in seen:
+                    seen.add(c.signature)
+                    out.append(c.signature)
+        return out
+
 
 def build_index(codebase_hash: str, language: str, root_path) -> Index:
     """Parsed einen Worktree und baut den Index."""

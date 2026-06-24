@@ -95,7 +95,7 @@ Auto-Auflösung aus `--path`). Für Agenten immer `--json`.
 | Befehl | Zweck |
 |---|---|
 | `lmc init --auto --path <w> --json` | Sprache erkennen + `lumos.yml` schreiben |
-| `lmc build --path <w> --json` | tree-sitter-Index + Joern-CPG bauen (`<hash>.bin`) |
+| `lmc build --path <w> [--scope sub] --json` | tree-sitter-Index + Joern-CPG bauen; `--scope` fuer Teilbaeume |
 | `lmc status --path <w> --json` | Gateway- + Joern-Status + CPG-Frische |
 
 ### Navigation (tree-sitter = instant; `--engine joern` = genaue Joern-Antwort)
@@ -106,6 +106,8 @@ Auto-Auflösung aus `--path`). Für Agenten immer `--json`.
 | `lmc callees <m> --path <w> [--engine joern] --json` | Was ruft diese Methode auf? |
 | `lmc source <m> --path <w> [--engine joern] --json` | Quelltext + Datei:Zeile |
 | `lmc context <m> --path <w> [--engine joern] --json` | Caller + Callee + Source gebündelt |
+| `lmc methods-of <Class> --path <w> [--engine joern] --json` | Alle Methoden einer Klasse |
+| `lmc callees-of-class <Class> --path <w> [--engine joern] --json` | Alle von einer Klasse aufgerufenen Methoden |
 | `lmc impact <m> --path <w> --depth N [--engine joern] --json` | Blast-Radius (rekursiv) |
 
 **Planungs-Disziplin:** Beim Planen/Refactoring zuerst `--engine joern` (große,
@@ -163,9 +165,10 @@ joern_parse("./src", "hash")
 run_cpgql("hash", 'cpg.method.name.l.mkString("\\n")')
 ```
 
-Module: `lmc.server.graph` (Extractor/Index), `lmc.server.store`,
+Module: `lmc.server.graph` (Extractor/Index: find/callers/callees/source/context/impact/methods_of/callees_of_class), `lmc.server.store`,
 `lmc.server.app` (Gateway), `lmc.server.lifecycle` (up/down),
-`lmc.joern` (Joern-REST + parse), `lmc.config` (lumos.yml/Spracherkennung).
+`lmc.joern` (Joern-REST + parse + nav_*), `lmc.diff` (check_diff als Funktion),
+`lmc.worktree` (State-Registry), `lmc.config` (lumos.yml/Spracherkennung).
 
 ## Paket bauen
 
