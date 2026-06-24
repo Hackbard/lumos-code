@@ -1,3 +1,20 @@
+---
+name: lumos-code
+description: >
+  Lumos Code (lmc) — polyglot Code Property Graph (tree-sitter + Joern/Docker)
+  for structural code analysis and agent guardrails. Use when the user asks who
+  calls/uses a method, blast radius / impact before refactoring a signature,
+  finding classes or methods by name, precommit structural checks, navigating a
+  codebase structurally, or cross-boundary (frontend->backend) impact. Provides
+  the `lmc` CLI (up/down/build/status/find/callers/callees/source/context/
+  methods-of/callees-of-class/impact/check-diff/precommit/query) with `--engine
+  joern|treesitter` and `--scope`. Guardrails: never guess on structural
+  questions — use lmc; run `lmc impact --engine joern` before changing a
+  widely-used method; run `lmc check-diff` before commit; refresh with
+  `lmc build` after adding files/methods. Supports c, cpp, csharp, go, java,
+  javascript, kotlin, php, python, ruby, scala, swift, typescript.
+---
+
 Lumos Code (lmc) - Core Skill & Guardrails
 
 Du hast Zugriff auf das CLI-Tool lmc (Lumos Code). Es ist dein primäres Werkzeug, um den Code Property Graph (CPG) des Projekts abzufragen.
