@@ -41,7 +41,7 @@ Oder global als Tool:
 
 ```bash
 uv build
-uv tool install dist/lumos_code-0.1.0-py3-none-any.whl --force
+uv tool install dist/lumos_code-0.2.0-py3-none-any.whl --force
 lmc up                  # baut einmalig das Joern-Image + startet Backend + Gateway
 ```
 
@@ -173,7 +173,7 @@ Module: `lmc.server.graph` (Extractor/Index: find/callers/callees/source/context
 ## Paket bauen
 
 ```bash
-uv build            # dist/lumos_code-0.1.0-py3-none-any.whl + .tar.gz
+uv build            # dist/lumos_code-0.2.0-py3-none-any.whl + .tar.gz
 ```
 
 ## Projektstruktur
