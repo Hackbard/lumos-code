@@ -66,6 +66,196 @@ Agent / Mensch
 
 `lmc up` startet beide; `lmc down` stoppt beide (Volume + CPGs bleiben erhalten).
 
+## How it runs — lifecycle & agent interaction
+
+This section explains what is running, who starts what, and when an AI agent
+(pi or Claude Code) reaches for which `lmc` command.
+
+### The moving parts
+
+```
+ your machine (one-time setup)
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  uv tool install dist/lumos_code-0.2.0-*.whl   →  ~/.local/bin/lmc │  global CLI
+ │  docker build -t lmc-joern:latest docker/     →  image (≈2.4 GB)   │  built on first `lmc up`
+ │  ~/.pi/agent/skills/lumos-code/SKILL.md                          │  pi skill
+ │  ~/.claude/skills/lumos-code/SKILL.md                            │  Claude Code skill
+ └──────────────────────────────────────────────────────────────────┘
+
+ runtime (per project)
+        lmc up
+   ┌──────────────────────────┐        ┌───────────────────────────┐
+   │  Lumos Gateway            │        │  Joern Backend             │
+   │  Starlette + uvicorn      │        │  Docker container          │
+   │  127.0.0.1:4243/mcp       │        │  lmc-joern (joern --server)│
+   │  in-memory: hash → Index  │        │  127.0.0.1:8085 REST       │
+   │  (tree-sitter CPG)        │        │  volume lmc-cpgs/*.bin     │
+   └─────────────┬────────────┘        └─────────────┬─────────────┘
+                 │ JSON-RPC tools/call                │ POST /query → poll /result/<uuid>
+                 │ (find/callers/callees/             │ (raw CPGQL, data-flow, taint)
+                 │  impact/source/context/            │
+                 │  methods-of/callees-of-class)      │
+                 └────────────────┬───────────────────┘
+                                  │
+                       ┌──────────┴──────────┐
+                       │  lmc CLI (typer)     │  stateless; --path gives context
+                       │  ~/.local/bin/lmc    │  --hash overrides, --url points elsewhere
+                       └──────────┬──────────┘
+                                  │ --json (agents always use --json)
+              ┌───────────────────┴────────────────────┐
+              │  AI agent (pi or Claude Code)          │
+              │  loads skill lumos-code on-demand      │
+              └────────────────────────────────────────┘
+```
+
+The gateway is the **fast** brain (tree-sitter, instant, polyglot, works even
+if Joern is down). The Joern container is the **deep** brain (real CPGQL, data
+flow, taint — slower, needs Docker). Both are started by `lmc up` and stopped
+by `lmc down`. The CLI itself is stateless; the worktree → CPG mapping lives in
+`lumos.yml` (per worktree) and `~/.cache/lumos/worktrees.json` (registry).
+
+### Lifecycle timeline
+
+```
+ time ──►
+
+ T0  first time ever (once per machine)
+     lmc up ──► builds lmc-joern:latest image (downloads Joern archive)
+             ──► starts joern container (8085) + gateway (4243)
+
+ T1  entering a project
+     lmc init --auto --path . ──► scans file extensions → writes lumos.yml
+                                  {language, codebase_hash}
+     lmc build --path .        ──► tree-sitter index  (gateway, in-memory)
+                              ──► joern-parse        (volume: <hash>.bin)
+                              ──► registers worktree in worktrees.json
+
+ T2  working (repeated, cheap)
+     lmc callers / callees / impact / find / source / context / methods-of
+     (default engine = treesitter → instant, in-process)
+     ──► agent re-runs these while editing, no rebuild needed
+
+ T3  planning a risky change (once, expensive)
+     lmc impact <m> --engine joern --depth 3 ──► full blast radius via Joern
+     lmc query "<CPGQL>"                      ──► data-flow / taint via Joern
+
+ T4  before commit
+     lmc check-diff --path . (alias: lmc precommit)
+     ──► reads `git diff` → maps changed files onto CPG → lists affected methods
+
+ T5  leaving / shutting down
+     lmc down ──► stops container + gateway (volume + <hash>.bin survive)
+```
+
+### Agent interaction loop (what pi / Claude Code do and when)
+
+The skill `lumos-code` is loaded on-demand (matching task, or forced via
+`/skill:lumos-code`). Rule #1 from the skill: **never guess on structural
+questions — ask `lmc`.** The agent then runs this loop:
+
+```
+ agent gets a coding task
+ │
+ ├─ new/unknown worktree?
+ │    └─ lmc init --auto --path <w> --json      (writes lumos.yml)
+ │
+ ├─ no CPG yet, or files/methods changed?
+ │    └─ lmc build --path <w> --json            (refresh index + <hash>.bin)
+ │
+ ├─ PLANNING a signature/logic change on a widely-used method
+ │    ├─ lmc impact <m> --engine joern --depth 3 --json   ← the BIG, accurate view
+ │    │      (Joern: type-aware call graph, full blast radius)
+ │    └─ optional: lmc query "<CPGQL>" --json   (data-flow / taint depth)
+ │
+ ├─ CODING — quick repeated checks while editing
+ │    └─ lmc callers / callees / impact <m> --json          ← default = treesitter (instant)
+ │
+ ├─ "who calls X?" / "where is X defined?" / "what does X call?"
+ │    └─ lmc callers / source / callees <m> --json          (treesitter)
+ │         └─ need it accurate? add  --engine joern
+ │
+ ├─ about to commit
+ │    └─ lmc check-diff --path <w> --json      (or lmc precommit)
+ │         status: safe → commit · review → fix warnings first
+ │
+ └─ done for now
+      └─ lmc down                              (optional; leaves volume intact)
+```
+
+### Two-engine decision (big first, then small)
+
+```
+                  ┌─────────────────────────────────────┐
+                  │  structural question?              │
+                  └──────────────────┬──────────────────┘
+                                     │
+            planning / first analysis│  quick check while coding
+                  (need accuracy)    │  (need speed)
+                                     │
+                  --engine joern     │  (default) treesitter
+                  ▼                  ▼  ▼
+          ┌─────────────┐    ┌──────────────┐
+          │ Joern 8085  │    │ Gateway 4243 │
+          │ CPGQL query │    │ tree-sitter  │
+          │ ~2–5 s      │    │ <50 ms       │
+          │ type-aware  │    │ name-based   │
+          │ data-flow ✓ │    │ data-flow ✗  │
+          └─────────────┘    └──────────────┘
+```
+
+### What happens under the hood per command
+
+```
+ lmc up
+   docker build (if image missing) → docker run -d lmc-joern (joern --server, 8085)
+   → wait for REST up + warmup query (consumes REPL banner)
+   → start python -m lmc.server (gateway, 4243) as background process (pidfile)
+
+ lmc init --auto --path .
+   walk tree, count file extensions → dominant language
+   → write lumos.yml {language, codebase_hash = sha1(abspath)[:16]}
+
+ lmc build --path .
+   gateway:  graph.build_index()  →  in-memory Index (methods + call edges)
+   joern:    docker run --rm -v <worktree>:/code:ro -v lmc-cpgs:/cpgs \
+               lmc-joern joern-parse /code -o /cpgs/<hash>.bin
+   worktree: register hash → {path, language, joern_built, joern_bin}
+
+ lmc <nav> --path .            (default engine = treesitter)
+   CLI → POST /mcp {tools/call, find_methods|get_call_graph|get_source|...}
+       → gateway answers from in-memory Index → JSON
+
+ lmc <nav> --engine joern      (accurate engine)
+   CLI builds CPGQL → POST joern:8085/query → poll /result/<uuid>
+       → parses `fullName|name|file|line` records → same JSON shape as treesitter
+
+ lmc query "<CPGQL>" --path .
+   CLI → importCpg("/cpgs/<hash>.bin"); <CPGQL> → Joern REST → cleaned stdout + result
+
+ lmc check-diff --path .
+   git diff --name-only → gateway find_methods(.* ) → filter to changed files
+       → warnings = CPG methods sitting in changed files → status safe|clean|review
+
+ lmc down
+   kill gateway pid (pidfile) → docker rm -f lmc-joern   (volume + *.bin kept)
+```
+
+### pi vs Claude Code — same CLI, different skill path
+
+```
+            lmc CLI (identical)             skill discovery
+            ──────────────────             ───────────────
+  pi        ~/.local/bin/lmc                ~/.pi/agent/skills/lumos-code/SKILL.md
+  Claude    ~/.local/bin/lmc                ~/.claude/skills/lumos-code/SKILL.md
+  Code
+```
+
+Both harnesses discover `lumos-code` from their global skills dir, load the
+same `SKILL.md`, and drive the same `lmc` binary. The agent never imports
+`lmc` as a Python package in normal use — it shells out to the CLI with
+`--json`. The library API (`lmc.server.graph`, `lmc.joern`, …) is there for
+scripts and power users.
+
 ## Schnellstart
 
 ```bash
