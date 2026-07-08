@@ -47,10 +47,14 @@ IDENT_KINDS = {
 SELF_OBJECTS = {"this", "self", "$this", "super", "it", "me"}
 
 
-def _text(node, src: str) -> str:
+def _text(node, src) -> str:
+    # src MUSS bytes sein (tree-sitter start_byte/end_byte sind BYTE-Offsets).
+    # FIX 2026-07-08: frueher read_text(str) + str-Slice mit Byte-Offsets -> bei Non-ASCII
+    # (Umlaute in Kommentaren/Strings) Codepoint!=Byte -> Garbled-Namen (CourseGateEvent
+    # -> ourseGateEvent, casts -> asts). Jetzt: bytes-Slice + decode.
     if node is None:
         return ""
-    return src[node.start_byte():node.end_byte()]
+    return src[node.start_byte():node.end_byte()].decode("utf-8", "replace")
 
 
 def _first_ident(node) -> Optional[object]:
@@ -295,12 +299,13 @@ def build_index(codebase_hash: str, language: str, root_path) -> Index:
         if any(part in _IGNORE for part in p.relative_to(root).parts[:-1]):
             continue
         try:
-            src = p.read_text(encoding="utf-8", errors="replace")
+            src_str = p.read_text(encoding="utf-8", errors="replace")  # parse braucht str (tslp 1.11.0)
+            src = src_str.encode("utf-8", "replace")  # FIX 2026-07-08: bytes fuer korrektes Byte-Offset-Slicing in _text
         except Exception:
             continue
-        idx.files[str(p)] = src
+        idx.files[str(p)] = src_str
         try:
-            tree = parser.parse(src)
+            tree = parser.parse(src_str)
         except Exception:
             continue
         _walk(tree.root_node(), src, str(p), idx, def_stack=[])
