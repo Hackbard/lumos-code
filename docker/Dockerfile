@@ -2,7 +2,7 @@
 # Kein externer Codebadger-Server noetig; lmc bringt Joern selbst mit.
 FROM eclipse-temurin:21-jdk
 
-ARG JOERN_VERSION=4.0.548
+ARG JOERN_VERSION=4.0.601
 ENV JOERN_HOME=/opt/joern-cli
 
 RUN apt-get update \
@@ -14,7 +14,7 @@ RUN apt-get update \
  # Frontends (java/c/cpp/js/ts/kotlin/...) sind Java-basiert und brauchen keine.
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL -o /tmp/joern-cli.zip \
-        "https://github.com/joernio/joern/releases/download/v${JOERN_VERSION}/joern-cli.zip" \
+        "https://github.com/joernio/joern/releases/download/v${JOERN_VERSION}/joern-cli-linux-$(uname -m | sed 's/x86_64/x86_64/;s/aarch64/arm64/').zip" \
  && unzip -q /tmp/joern-cli.zip -d /opt \
  && rm /tmp/joern-cli.zip \
  && JOERN_DIR="$(find /opt -maxdepth 1 -type d -name 'joern*' | head -1)" \

@@ -54,16 +54,16 @@ def _text(node, src) -> str:
     # -> ourseGateEvent, casts -> asts). Jetzt: bytes-Slice + decode.
     if node is None:
         return ""
-    return src[node.start_byte():node.end_byte()].decode("utf-8", "replace")
+    return src[node.start_byte:node.end_byte].decode("utf-8", "replace")
 
 
 def _first_ident(node) -> Optional[object]:
     """Erster identifier-aehniger Named-Child (rekursiv, flach zuerst)."""
-    for i in range(node.named_child_count()):
+    for i in range(node.named_child_count):
         c = node.named_child(i)
-        if c.kind() in IDENT_KINDS:
+        if c.type in IDENT_KINDS:
             return c
-    for i in range(node.named_child_count()):
+    for i in range(node.named_child_count):
         c = node.named_child(i)
         r = _first_ident(c)
         if r:
@@ -93,14 +93,14 @@ def def_name(node, src: str) -> str:
 
 
 def class_of(node, src: str) -> Optional[str]:
-    parent = node.parent()
+    parent = node.parent
     while parent is not None:
-        if parent.kind() in CLASS_KINDS:
+        if parent.type in CLASS_KINDS:
             cn = parent.child_by_field_name("name")
             if not cn:
                 cn = _first_ident(parent)
             return _text(cn, src) if cn else None
-        parent = parent.parent()
+        parent = parent.parent
     return None
 
 
@@ -113,10 +113,10 @@ def callee_of(call_node, src: str, caller_class: Optional[str]) -> Tuple[str, Op
         return _text(n, src), _resolve_class(obj_t, caller_class)
     f = call_node.child_by_field_name("function")
     if f is None:
-        f = call_node.named_child(0) if call_node.named_child_count() else None
+        f = call_node.named_child(0) if call_node.named_child_count else None
     if f is None:
         return "", None
-    fk = f.kind()
+    fk = f.type
     if fk in IDENT_KINDS:
         return _text(f, src), None
     # member_expression / field_access / scoped_identifier / qualified_identifier
@@ -305,21 +305,21 @@ def build_index(codebase_hash: str, language: str, root_path) -> Index:
             continue
         idx.files[str(p)] = src_str
         try:
-            tree = parser.parse(src_str)
+            tree = parser.parse(src)
         except Exception:
             continue
-        _walk(tree.root_node(), src, str(p), idx, def_stack=[])
+        _walk(tree.root_node, src, str(p), idx, def_stack=[])
     idx.finalize()
     return idx
 
 
 def _walk(node, src, file, idx, def_stack):
-    k = node.kind()
+    k = node.type
     if k in DEF_KINDS and def_name(node, src):
         m = Method(
             name=def_name(node, src), cls=class_of(node, src),
-            file=file, line=node.start_position().row + 1, kind=k,
-            start_byte=node.start_byte(), end_byte=node.end_byte(),
+            file=file, line=node.start_point.row + 1, kind=k,
+            start_byte=node.start_byte, end_byte=node.end_byte,
         )
         idx.methods.append(m)
         def_stack = def_stack + [m]
@@ -328,9 +328,9 @@ def _walk(node, src, file, idx, def_stack):
         cname, ccls = callee_of(node, src, caller.cls)
         if cname:
             idx.edges.append(Edge(caller=caller, callee_name=cname, callee_class=ccls))
-    for i in range(node.child_count()):
+    for i in range(node.child_count):
         c = node.child(i)
-        if c.is_named():
+        if c.is_named:
             _walk(c, src, file, idx, def_stack)
 
 

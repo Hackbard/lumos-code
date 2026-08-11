@@ -1,6 +1,6 @@
 [project]
 name = "lumos-code"
-version = "0.2.0"
+version = "1.0.0"
 description = "Polyglot CPG-Stack für lokales Live-Coding & Agent-Guardrails"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -9,8 +9,8 @@ dependencies = [
 "rich>=13.0.0",
 "httpx>=0.25.0",
 "pyyaml>=6.0.1",
-"tree-sitter>=0.25,<0.26",  # 0.26 renames Node.kind()->.type + parse() requires bytes — graph.py targets 0.25 API
-"tree-sitter-language-pack>=1.10,<1.12",  # 1.12+ requires bytes for parse; graph.py validated against 1.11
+"tree-sitter>=0.25",  # 0.26: Node.kind() -> .type; graph.py nutzt .type, _first_ident/_walk ebenfalls
+"tree-sitter-language-pack>=1.10",  # 1.12+: parse() akzeptiert bytes ODER str — graph.py encoded explizit
 "starlette>=0.27",
 "uvicorn>=0.23",
 ]
