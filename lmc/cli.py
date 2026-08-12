@@ -149,7 +149,7 @@ def build(
                       f"[dim](Sprache: {language} via {quelle}, hash: {cbh}{scope_note})[/dim]")
     result = _client().generate_cpg(source_path=src, language=language, codebase_hash=cbh)
     # Joern-CPG (<hash>.bin) im Volume — best-effort; nav laeuft ohnehin auf tree-sitter.
-    joern_res = joern_mod.joern_parse(src, cbh)
+    joern_res = joern_mod.joern_parse(src, cbh, language)
     if isinstance(result, dict) and result.get("success"):
         worktree.register(cbh, path, language,
                           joern_built=bool(joern_res.get("success")),

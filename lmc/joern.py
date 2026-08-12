@@ -25,6 +25,34 @@ CONTAINER = "lmc-joern"
 VOLUME = "lmc-cpgs"
 CPG_DIR_IN_CONTAINER = "/cpgs"
 
+# Dependency- und Build-Ordner gehoeren nie in den CPG: sie vervielfachen die
+# Dateizahl (Laravel: 3.5k Projekt- vs. 55k vendor-Dateien) und bringen das
+# Frontend zum Absturz, bevor irgendein Projektcode analysiert ist.
+DEFAULT_EXCLUDES = (
+    "vendor", "node_modules", ".venv", "venv", "__pycache__",
+    "storage", "public", "dist", "build", "target", ".git",
+)
+
+# ponytail: joern-parse kennt kein --exclude, und was nach --frontend-args kommt,
+# reicht es auch an den TypeStubs-Schritt weiter -- der scheitert daran
+# ("unable to parse XTypeStubsParserConfig"). Darum rufen wir das Sprach-Frontend
+# direkt auf, wo wir es kennen; alles andere laeuft unveraendert ueber joern-parse.
+# Verifiziert nur fuer php2cpg; die uebrigen Namen stammen aus /opt/joern-cli/frontends.
+FRONTEND_BY_LANGUAGE = {
+    "php": "php2cpg",
+    "javascript": "jssrc2cpg",
+    "typescript": "jssrc2cpg",
+    "python": "pysrc2cpg",
+    "java": "javasrc2cpg",
+    "go": "gosrc2cpg",
+    "ruby": "rubysrc2cpg",
+    "csharp": "csharpsrc2cpg",
+    "swift": "swiftsrc2cpg",
+    "kotlin": "kotlin2cpg",
+    "c": "c2cpg",
+    "cpp": "c2cpg",
+}
+
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
@@ -109,15 +137,31 @@ def cpg_path_in_container(codebase_hash: str) -> str:
     return f"{CPG_DIR_IN_CONTAINER}/{codebase_hash}.bin"
 
 
-def joern_parse(worktree: str, codebase_hash: str) -> dict:
-    """Baut <hash>.bin im Volume aus dem Worktree via `joern-parse` im Container."""
-    out = cpg_path_in_container(codebase_hash)
-    cmd = [
+def parse_command(worktree: str, out: str, language: str | None = None) -> list[str]:
+    """Baut das docker-Kommando fuer den CPG-Lauf.
+
+    Mit bekannter Sprache das Frontend direkt (dann greifen die Excludes),
+    sonst unveraendert `joern-parse` ueber den ganzen Baum.
+    """
+    base = [
         "docker", "run", "--rm",
         "-v", f"{worktree}:/code:ro",
         "-v", f"{VOLUME}:{CPG_DIR_IN_CONTAINER}",
-        IMAGE, "joern-parse", "/code", "-o", out,
+        IMAGE,
     ]
+    frontend = FRONTEND_BY_LANGUAGE.get((language or "").lower())
+    if frontend is None:
+        return base + ["joern-parse", "/code", "-o", out]
+    excludes = []
+    for d in DEFAULT_EXCLUDES:
+        excludes += ["--exclude", f"/code/{d}"]
+    return base + [frontend, "/code", *excludes, "-o", out]
+
+
+def joern_parse(worktree: str, codebase_hash: str, language: str | None = None) -> dict:
+    """Baut <hash>.bin im Volume aus dem Worktree im Container."""
+    out = cpg_path_in_container(codebase_hash)
+    cmd = parse_command(worktree, out, language)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except FileNotFoundError:
@@ -278,3 +322,11 @@ if __name__ == "__main__":
     # ponytail: self-check braucht laufenden `lmc up` + gebauten CPG; nur Smoke-Test.
     jc = JoernClient()
     print("joern up:", jc.is_up())
+
+    # Smoke-Test der Kommando-Konstruktion (laeuft ohne Docker).
+    # Die Details deckt tests/test_joern_parse_excludes.py ab.
+    php = parse_command("/w", "/cpgs/x.bin", "php")
+    assert "php2cpg" in php and "/code/vendor" in php, php
+    assert parse_command("/w", "/cpgs/x.bin", None)[-4:] == \
+        ["joern-parse", "/code", "-o", "/cpgs/x.bin"], "Fallback bleibt wie vorher"
+    print("joern.py parse_command smoke-check OK")
