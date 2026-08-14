@@ -133,9 +133,11 @@ def init(
 def build(
     path: str = typer.Option(".", "--path", help="Pfad zum Worktree"),
     scope: str = typer.Option(None, "--scope", help="Teilbaum (relativer Pfad im Worktree) statt ganzer Tree"),
+    include_gitignored: bool = typer.Option(False, "--include-gitignored-files",
+        help="Auch .gitignore-ignorierte Dateien in den CPG aufnehmen"),
     as_json: bool = typer.Option(False, "--json"),
 ):
-    """Baut den CPG für den aktuellen Worktree (lmc build). --scope für Teilbäume."""
+    """Baut den CPG fuer den aktuellen Worktree (lmc build). --scope fuer Teilbaeume."""
     try:
         language, quelle = _lang_from(path)
     except Exception as e:
@@ -147,7 +149,10 @@ def build(
         scope_note = f", scope={scope}" if scope else ""
         console.print(f"[bold blue]Baue CPG für {path}[/bold blue] "
                       f"[dim](Sprache: {language} via {quelle}, hash: {cbh}{scope_note})[/dim]")
-    result = _client().generate_cpg(source_path=src, language=language, codebase_hash=cbh)
+    result = _client().generate_cpg(
+        source_path=src, language=language, codebase_hash=cbh,
+        include_gitignored_files=include_gitignored,
+    )
     # Joern-CPG (<hash>.bin) im Volume — best-effort; nav laeuft ohnehin auf tree-sitter.
     joern_res = joern_mod.joern_parse(src, cbh, language)
     if isinstance(result, dict) and result.get("success"):

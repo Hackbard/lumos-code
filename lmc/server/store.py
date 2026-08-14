@@ -9,8 +9,12 @@ from .graph import Index, build_index
 _STORE: Dict[str, dict] = {}  # hash -> {"index": Index, "language": str, "built_at": float}
 
 
-def generate(codebase_hash: str, source_path: str, language: str) -> Index:
-    idx = build_index(codebase_hash, language, source_path)
+def generate(
+    codebase_hash: str, source_path: str, language: str,
+    include_gitignored_files: bool = False,
+) -> Index:
+    idx = build_index(codebase_hash, language, source_path,
+                      include_gitignored_files=include_gitignored_files)
     _STORE[codebase_hash] = {
         "index": idx, "language": language, "built_at": time.time(),
         "source_path": source_path,

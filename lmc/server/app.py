@@ -47,13 +47,15 @@ def tool_generate_cpg(args: dict) -> str:
     language = args.get("language")
     if not source_path or not language:
         return _err("source_path und language erforderlich")
+    include_gitignored = args.get("include_gitignored_files", False)
     codebase_hash = args.get("codebase_hash")
     if not codebase_hash:
         import hashlib
         from pathlib import Path
         codebase_hash = hashlib.sha1(str(Path(source_path).resolve()).encode()).hexdigest()[:16]
     try:
-        idx = store.generate(codebase_hash, source_path, language)
+        idx = store.generate(codebase_hash, source_path, language,
+                             include_gitignored_files=include_gitignored)
     except Exception as e:
         return _err(str(e))
     return _ok({

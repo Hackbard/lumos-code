@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from pathspec import PathSpec
+from pathspec.patterns.gitwildmatch import GitWildMatchPattern
 from tree_sitter_language_pack import get_parser
 
 #Unsere Sprachen -> tree-sitter-Sprachname.
@@ -283,7 +285,10 @@ class Index:
         return out
 
 
-def build_index(codebase_hash: str, language: str, root_path) -> Index:
+def build_index(
+    codebase_hash: str, language: str, root_path,
+    include_gitignored_files: bool = False,
+) -> Index:
     """Parsed einen Worktree und baut den Index."""
     ts_lang = TS_LANG.get(language)
     if not ts_lang:
@@ -293,11 +298,22 @@ def build_index(codebase_hash: str, language: str, root_path) -> Index:
     idx = Index(codebase_hash=codebase_hash, language=language)
     exts = _exts_for(language)
 
+    # ponytail: .gitignore-Patterns einlesen (einfachstes glob-basiertes Ignore)
+    # Nicht-indexieren ist Standard; expliziter Flag zum Include.
+    gitignore_spec: PathSpec | None = None
+    if not include_gitignored_files:
+        gitignore_spec = _load_gitignore_patterns(root)
+
     for p in root.rglob("*"):
         if not p.is_file() or p.suffix.lower() not in exts:
             continue
         if any(part in _IGNORE for part in p.relative_to(root).parts[:-1]):
             continue
+        # .gitignore-check: relative path gegen gitwildmatch patterns
+        if gitignore_spec is not None:
+            rel = str(p.relative_to(root))
+            if gitignore_spec.match_file(rel):
+                continue
         try:
             src_str = p.read_text(encoding="utf-8", errors="replace")  # parse braucht str (tslp 1.11.0)
             src = src_str.encode("utf-8", "replace")  # FIX 2026-07-08: bytes fuer korrektes Byte-Offset-Slicing in _text
@@ -332,6 +348,37 @@ def _walk(node, src, file, idx, def_stack):
         c = node.child(i)
         if c.is_named:
             _walk(c, src, file, idx, def_stack)
+
+
+def _load_gitignore_patterns(root: Path) -> Optional[PathSpec]:
+    """Liest .gitignore-Dateien von root (und .git/info/exclude) und gibt ein PathSpec zurueck."""
+    try:
+        lines: list[str] = []
+        gi = root / ".gitignore"
+        if gi.is_file():
+            lines.extend(_parse_gitignore_file(gi))
+        excl = root / ".git" / "info" / "exclude"
+        if excl.is_file():
+            lines.extend(_parse_gitignore_file(excl))
+        if not lines:
+            return None
+        return PathSpec.from_lines(GitWildMatchPattern, lines)
+    except Exception:
+        return None
+
+
+def _parse_gitignore_file(path: Path) -> list[str]:
+    """Parst eine .gitignore-Datei, ignoriert Kommentare und leere Zeilen."""
+    lines: list[str] = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Leading ! = negate (pathspec support)
+        # Leading / = anchor to repo root (gitwildmatch default)
+        # Trailing / = directory only (pathspec handles)
+        lines.append(line)
+    return lines
 
 
 _IGNORE = {
@@ -380,4 +427,23 @@ if __name__ == "__main__":
         idx2 = build_index("h2", "python", d)
         assert sorted(m.signature for m in idx2.methods) == ["bar", "foo"]
         assert [m.signature for m in idx2.callers("bar")] == ["foo"]
+
+        # ponytail: .gitignore self-check
+        gi = Path(d) / ".gitignore"
+        gi.write_text("# comment\n\nvendor/\n")
+        specs = _load_gitignore_patterns(Path(d))
+        assert specs is not None, "gitignore sollte geladen werden"
+        assert specs.match_file("vendor/foo.php"), "vendor/ sollte matchen"
+        # Integration: build_index mit gitignoredem Unterordner
+        gi.write_text("generated/\n")
+        gen = Path(d) / "generated"
+        gen.mkdir()
+        (gen / "gen.php").write_text(
+            '<?php class Gen { public function build() { } }\n')
+        idx3 = build_index("h3", "php", d)
+        gen_sigs = [m.signature for m in idx3.methods if "gen.php" in m.file]
+        assert len(gen_sigs) == 0, f"gitignore sollte generated/ filtern, aber found {gen_sigs}"
+        idx4 = build_index("h4", "php", d, include_gitignored_files=True)
+        gen_sigs2 = [m.signature for m in idx4.methods if "gen.php" in m.file]
+        assert len(gen_sigs2) == 1, "include_gitignored=True sollte gen.php enthalten"
     print("graph.py self-check OK; php methods:", sigs)

@@ -40,10 +40,15 @@ class CodebadgerClient:
 
     # --- Kern-Methoden ---
 
-    def generate_cpg(self, source_path: str, language: str, codebase_hash: Optional[str] = None) -> Dict[str, Any]:
+    def generate_cpg(
+        self, source_path: str, language: str, codebase_hash: Optional[str] = None,
+        include_gitignored_files: bool = False,
+    ) -> Dict[str, Any]:
         args = {"source_path": source_path, "language": language}
         if codebase_hash:
             args["codebase_hash"] = codebase_hash
+        if include_gitignored_files:
+            args["include_gitignored_files"] = True
         return self._call("generate_cpg", args)
 
     def get_cpg_status(self, codebase_hash: str) -> Dict[str, Any]:
