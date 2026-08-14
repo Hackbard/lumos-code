@@ -41,7 +41,7 @@ Oder global als Tool:
 
 ```bash
 uv build
-uv tool install dist/lumos_code-0.2.0-py3-none-any.whl --force
+uv tool install dist/lumos_code-1.0.1-py3-none-any.whl --force
 lmc up                  # baut einmalig das Joern-Image + startet Backend + Gateway
 ```
 
@@ -60,7 +60,7 @@ Agent / Mensch
 ┌───────────────────────────────┐
 │ Joern-Backend (Docker, 8085)  │  echtes CPGQL / Data-Flow
 │  Container lmc-joern          │  CPGs im Volume lmc-cpgs (<hash>.bin)
-│  Image lmc-joern:latest       │  (docker/Dockerfile, offizielles Joern-Release)
+│  Image lmc-joern:latest       │  (docker/Dockerfile, Joern v4.0.601)
 └───────────────────────────────┘
 ```
 
@@ -76,7 +76,7 @@ This section explains what is running, who starts what, and when an AI agent
 ```
  your machine (one-time setup)
  ┌──────────────────────────────────────────────────────────────────┐
- │  uv tool install dist/lumos_code-0.2.0-*.whl   →  ~/.local/bin/lmc │  global CLI
+ │  uv tool install dist/lumos_code-1.0.1-*.whl   →  ~/.local/bin/lmc │  global CLI
  │  docker build -t lmc-joern:latest docker/     →  image (≈2.4 GB)   │  built on first `lmc up`
  │  ~/.pi/agent/skills/lumos-code/SKILL.md                          │  pi skill
  │  ~/.claude/skills/lumos-code/SKILL.md                            │  Claude Code skill
@@ -144,7 +144,7 @@ by `lmc down`. The CLI itself is stateless; the worktree → CPG mapping lives i
      ──► reads `git diff` → maps changed files onto CPG → lists affected methods
 
  T5  leaving / shutting down
-     lmc down ──► stops container + gateway (volume + <hash>.bin survive)
+     lmc down ──► stops container + gateway (volume + *.bin survive)
 ```
 
 ### Agent interaction loop (what pi / Claude Code do and when)
@@ -218,7 +218,7 @@ questions — ask `lmc`.** The agent then runs this loop:
  lmc build --path .
    gateway:  graph.build_index()  →  in-memory Index (methods + call edges)
    joern:    docker run --rm -v <worktree>:/code:ro -v lmc-cpgs:/cpgs \
-               lmc-joern joern-parse /code -o /cpgs/<hash>.bin
+               lmc-joern <frontend> /code --exclude /code/vendor ... -o /cpgs/<hash>.bin
    worktree: register hash → {path, language, joern_built, joern_bin}
 
  lmc <nav> --path .            (default engine = treesitter)
@@ -327,16 +327,31 @@ iterativen Checks beim Coden.
 6. **Frische-Disziplin:** Neue Dateien/Methoden → `lmc build --path .`.
 7. **Data-Flow/Taint:** Für tiefe Analysen `lmc query` (Joern-CPGQL).
 
+## Ignorierte Verzeichnisse
+
+Language-Detection, tree-sitter-Index und Joern-CPG filtern dieselben Pfade
+heraus, bevor sie in den Graph gelangen:
+
+```
+.git, node_modules, vendor, .venv, venv, dist, build, __pycache__,
+.idea, .vscode, target, bower_components, storage, var, cache
+```
+
+Das verhindert, dass Dependency-Bäume (Laravel `vendor`, npm `node_modules`,
+Python `.venv` …) den CPG aufblähen und die Analyse lahmlegen. Nur
+Projekt-Quelldateien landen im Index.
+
 ## Joern-Backend (Docker)
 
 Eigenes Image `lmc-joern:latest` aus `docker/Dockerfile` (basiert auf
-`eclipse-temurin:21-jdk` + offiziellem Joern-Release v4.0.548). Beim ersten
+`eclipse-temurin:21-jdk` + offiziellem Joern-Release **v4.0.601**). Beim ersten
 `lmc up` wird es automatisch gebaut (~einmalig, Download des Joern-Archivs).
 
 - Container `lmc-joern` läuft mit `joern --server` (REST auf 8085).
-- CPGs liegen im Docker-Volume `lmc-cpgs` als `<codebase_hash>.bin`.
-- `lmc build` erzeugt sie per `joern-parse`; `lmc query` lädt sie per
-  `importCpg` und führt CPGQL aus.
+- CPGs liegen im Docker-Volume `lmc-cpgs` als `<hash>.bin`.
+- `lmc build` erzeugt sie per `<frontend> --exclude ...` (php2cpg, jssrc2cpg,
+  pysrc2cpg, … je nach Sprache — keine Excludes mehr im generic `joern-parse`);
+  `lmc query` lädt sie per `importCpg` und führt CPGQL aus.
 
 Manuell bauen (optional, vorab):
 ```bash
@@ -363,7 +378,20 @@ Module: `lmc.server.graph` (Extractor/Index: find/callers/callees/source/context
 ## Paket bauen
 
 ```bash
-uv build            # dist/lumos_code-0.2.0-py3-none-any.whl + .tar.gz
+uv build            # dist/lumos_code-1.0.1-py3-none-any.whl + .tar.gz
+```
+
+## Abhängigkeiten
+
+```
+typer >=0.27          # CLI
+rich >=13.0.0         # Terminal-Output
+httpx >=0.25.0        # HTTP-Client (Joern REST + Gateway JSON-RPC)
+pyyaml >=6.0.1        # lumos.yml parsing
+tree-sitter >=0.26    # CPG-Parsing (polyglot)
+tree-sitter-language-pack >=1.14  # Parser-Factory für alle Sprachen
+starlette >=0.27      # Gateway (Starlette/uvicorn)
+uvicorn >=0.23        # ASGI-Server für Gateway
 ```
 
 ## Projektstruktur
@@ -372,10 +400,13 @@ uv build            # dist/lumos_code-0.2.0-py3-none-any.whl + .tar.gz
 lmc/
 ├── __init__.py
 ├── cli.py            # typer CLI (alle Befehle + globale Flags)
-├── client.py         # LumosClient (httpx JSON-RPC an Gateway)
+├── client.py         # CodebadgerClient (httpx JSON-RPC an Gateway)
 ├── config.py         # lumos.yml + polyglote Sprach-Erkennung
+├── diff.py           # check_diff Funktion (git diff → CPG mapping)
 ├── joern.py          # Joern-REST-Client + joern-parse (Docker)
+├── worktree.py       # Worktree-State-Registry (~/.cache/lumos/worktrees.json)
 └── server/
+    ├── __init__.py
     ├── __main__.py   # `python -m lmc.server` (uvicorn-Gateway)
     ├── app.py        # Starlette JSON-RPC-Gateway (tree-sitter Tools)
     ├── graph.py      # tree-sitter CPG-Extractor + Index/Queries
@@ -385,6 +416,9 @@ docker/Dockerfile     # eigenes Joern-Backend-Image (lmc-joern:latest)
 pyproject.toml        # Hatchling-Build + Entry-Point `lmc`
 uv.lock
 SKILL.md              # Guardrail-Regeln für Coding-Agenten
+tests/
+├── test_graph_nonascii_offsets.py  # Regression: Non-ASCII Byte-Offset-Fix
+└── test_joern_parse_excludes.py    # Regression: Dependency-Exclude-Fix
 ```
 
 ## Lizenz
