@@ -14,9 +14,11 @@ from __future__ import annotations
 import re
 import subprocess
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 import httpx
+
+from lmc.config import excludes_from_config
 
 JOERN_HOST = "127.0.0.1"
 JOERN_PORT = 8085
@@ -31,6 +33,8 @@ CPG_DIR_IN_CONTAINER = "/cpgs"
 DEFAULT_EXCLUDES = (
     "vendor", "node_modules", ".venv", "venv", "__pycache__",
     "storage", "public", "dist", "build", "target", ".git",
+    ".worktrees",  # git worktrees: ganze Zweit-Checkouts, sonst kommt jeder Treffer n-fach
+    ".phpstan",  # PHPStan-Cache: resultCache.php wird zweistellig MB gross -> OOM beim Einlesen
 )
 
 # ponytail: joern-parse kennt kein --exclude, und was nach --frontend-args kommt,
@@ -137,11 +141,13 @@ def cpg_path_in_container(codebase_hash: str) -> str:
     return f"{CPG_DIR_IN_CONTAINER}/{codebase_hash}.bin"
 
 
-def parse_command(worktree: str, out: str, language: str | None = None) -> list[str]:
+def parse_command(worktree: str, out: str, language: str | None = None,
+                  extra_excludes: Iterable[str] = ()) -> list[str]:
     """Baut das docker-Kommando fuer den CPG-Lauf.
 
     Mit bekannter Sprache das Frontend direkt (dann greifen die Excludes),
-    sonst unveraendert `joern-parse` ueber den ganzen Baum.
+    sonst unveraendert `joern-parse` ueber den ganzen Baum. `extra_excludes`
+    kommt aus dem `exclude:`-Key der lumos.yml und ergaenzt DEFAULT_EXCLUDES.
     """
     base = [
         "docker", "run", "--rm",
@@ -153,15 +159,19 @@ def parse_command(worktree: str, out: str, language: str | None = None) -> list[
     if frontend is None:
         return base + ["joern-parse", "/code", "-o", out]
     excludes = []
-    for d in DEFAULT_EXCLUDES:
+    for d in dict.fromkeys((*DEFAULT_EXCLUDES, *extra_excludes)):
         excludes += ["--exclude", f"/code/{d}"]
     return base + [frontend, "/code", *excludes, "-o", out]
 
 
 def joern_parse(worktree: str, codebase_hash: str, language: str | None = None) -> dict:
-    """Baut <hash>.bin im Volume aus dem Worktree im Container."""
+    """Baut <hash>.bin im Volume aus dem Worktree im Container.
+
+    Die lumos.yml wird im gemounteten Baum gesucht; bei `--scope` zeigt
+    `worktree` auf den Teilbaum, dann greifen nur DEFAULT_EXCLUDES.
+    """
     out = cpg_path_in_container(codebase_hash)
-    cmd = parse_command(worktree, out, language)
+    cmd = parse_command(worktree, out, language, excludes_from_config(worktree))
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except FileNotFoundError:

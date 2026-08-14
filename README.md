@@ -214,6 +214,7 @@ questions — ask `lmc`.** The agent then runs this loop:
  lmc init --auto --path .
    walk tree, count file extensions → dominant language
    → write lumos.yml {language, codebase_hash = sha1(abspath)[:16]}
+   optional, by hand: exclude: [<dir>, ...]  → project-specific dirs to skip
 
  lmc build --path .
    gateway:  graph.build_index()  →  in-memory Index (methods + call edges)
@@ -352,6 +353,17 @@ Eigenes Image `lmc-joern:latest` aus `docker/Dockerfile` (basiert auf
 - `lmc build` erzeugt sie per `<frontend> --exclude ...` (php2cpg, jssrc2cpg,
   pysrc2cpg, … je nach Sprache — keine Excludes mehr im generic `joern-parse`);
   `lmc query` lädt sie per `importCpg` und führt CPGQL aus.
+
+Ausgeschlossen werden Dependency- und Build-Ordner (`vendor`, `node_modules`,
+`.worktrees`, …). Was nur in *einem* Projekt stört — ein mitgeschleppter
+Legacy-Baum etwa —, kommt in die `lumos.yml` und gilt dann für beide Engines:
+
+```yaml
+language: php
+codebase_hash: d870a6000cbcd0ae
+exclude:
+  - legacy_app
+```
 
 Manuell bauen (optional, vorab):
 ```bash

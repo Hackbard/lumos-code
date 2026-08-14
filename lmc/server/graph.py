@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Tuple
 
 from tree_sitter_language_pack import get_parser
 
+from lmc.config import excludes_from_config
+
 #Unsere Sprachen -> tree-sitter-Sprachname.
 TS_LANG = {
     "php": "php", "python": "python", "javascript": "javascript",
@@ -292,11 +294,14 @@ def build_index(codebase_hash: str, language: str, root_path) -> Index:
     root = Path(root_path).resolve()
     idx = Index(codebase_hash=codebase_hash, language=language)
     exts = _exts_for(language)
+    # Projekteigene Ausschluesse aus der lumos.yml im Baum; bei --scope liegt dort
+    # keine, dann bleibt es bei _IGNORE.
+    ignore = _IGNORE | excludes_from_config(root)
 
     for p in root.rglob("*"):
         if not p.is_file() or p.suffix.lower() not in exts:
             continue
-        if any(part in _IGNORE for part in p.relative_to(root).parts[:-1]):
+        if any(part in ignore for part in p.relative_to(root).parts[:-1]):
             continue
         try:
             src_str = p.read_text(encoding="utf-8", errors="replace")  # parse braucht str (tslp 1.11.0)
@@ -337,7 +342,7 @@ def _walk(node, src, file, idx, def_stack):
 _IGNORE = {
     ".git", "node_modules", "vendor", ".venv", "venv", "dist", "build",
     "__pycache__", ".idea", ".vscode", "target", "bower_components",
-    "storage", "var", "cache", "__pycache__",
+    "storage", "var", "cache", "__pycache__", ".worktrees", ".phpstan",
 }
 
 _LANG_EXTS = {
