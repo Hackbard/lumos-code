@@ -90,6 +90,22 @@ def load_config(path) -> dict:
     return yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
 
 
+def excludes_from_config(path) -> set:
+    """Projekteigene Ausschluesse aus dem `exclude:`-Key der lumos.yml.
+
+    Fuer Verzeichnisse, die nur in *diesem* Projekt stoeren und darum nichts in
+    IGNORE_DIRS/DEFAULT_EXCLUDES zu suchen haben — etwa ein mitgeschleppter
+    Legacy-Baum. Erwartet Top-Level-Namen relativ zur Worktree-Wurzel:
+
+        exclude:
+          - legacy_app
+
+    Liefert eine leere Menge, wenn es keine lumos.yml oder keinen Key gibt.
+    """
+    raw = load_config(path).get("exclude") or []
+    return {str(d).strip("/") for d in raw if str(d).strip("/")}
+
+
 def save_config(path, language: str, extra: dict | None = None) -> Path:
     """Schreibt lumos.yml mit Sprache + optionalem extra (z.B. codebase_hash)."""
     cfg_path = Path(path).resolve() / CONFIG_NAME
