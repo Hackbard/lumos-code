@@ -337,7 +337,7 @@ def _walk(node, src, file, idx, def_stack):
 _IGNORE = {
     ".git", "node_modules", "vendor", ".venv", "venv", "dist", "build",
     "__pycache__", ".idea", ".vscode", "target", "bower_components",
-    "storage", "var", "cache", "__pycache__",
+    "storage", "var", "cache", "__pycache__", ".worktrees", ".phpstan",
 }
 
 _LANG_EXTS = {

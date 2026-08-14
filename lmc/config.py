@@ -37,7 +37,7 @@ SUPPORTED_LANGUAGES = sorted(LANGUAGE_EXTENSIONS)
 IGNORE_DIRS = {
     ".git", "node_modules", "vendor", ".venv", "venv", "dist", "build",
     "__pycache__", ".idea", ".vscode", "target", "bower_components",
-    "storage", "var", "cache",
+    "storage", "var", "cache", ".worktrees", ".phpstan",
 }
 
 CONFIG_NAME = "lumos.yml"
