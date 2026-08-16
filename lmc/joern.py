@@ -31,6 +31,8 @@ CPG_DIR_IN_CONTAINER = "/cpgs"
 DEFAULT_EXCLUDES = (
     "vendor", "node_modules", ".venv", "venv", "__pycache__",
     "storage", "public", "dist", "build", "target", ".git",
+    ".worktrees",  # git worktrees: ganze Zweit-Checkouts, sonst kommt jeder Treffer n-fach
+    ".phpstan",  # PHPStan-Cache: resultCache.php wird zweistellig MB gross -> OOM beim Einlesen
 )
 
 # ponytail: joern-parse kennt kein --exclude, und was nach --frontend-args kommt,
