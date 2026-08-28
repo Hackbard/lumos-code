@@ -55,6 +55,11 @@ FRONTEND_BY_LANGUAGE = {
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
+# Die Joern-REPL schreibt Fehler als `<paket>.<Klasse>Error:` / `...Exception:` an den
+# Zeilenanfang; regulaere Ergebniszeilen beginnen mit `val resN:`.
+_REPL_ERROR = re.compile(r'^(?:[\w$]+\.)*[\w$]*(?:Error|Exception)(?::|\s*$)', re.M)
+_NO_CPG_LOADED = "No projects loaded"
+
 
 def _extract_result(stdout: str) -> str:
     """Extrahiert den Wert der letzten `val resN: ... = <wert>` Bindung.
@@ -130,6 +135,12 @@ class JoernClient:
         if not res.get("success"):
             return res
         stdout = res["stdout"].strip()
+        # Die REPL meldet Fehler im stdout, das REST-Protokoll bleibt dabei auf
+        # success=true. Ohne diese Pruefung kommt eine gescheiterte Query als
+        # Erfolg mit leerem `result` zurueck -- ein Nulltreffer, der wie ein
+        # Ergebnis aussieht.
+        if _REPL_ERROR.search(stdout):
+            return {"success": False, "error": stdout, "engine": "joern"}
         return {"success": True, "stdout": stdout, "result": _extract_result(stdout), "engine": "joern"}
 
 
@@ -174,10 +185,27 @@ def joern_parse(worktree: str, codebase_hash: str, language: str | None = None) 
 
 
 def run_cpgql(codebase_hash: str, cpgql: str, url: str | None = None, timeout: float = 120.0) -> dict:
-    """Laedt den CPG und fuehrt rohes CPGQL aus; liefert cleaned stdout."""
-    cpg = cpg_path_in_container(codebase_hash)
-    full = f'importCpg("{cpg}")\n{cpgql}'
-    return JoernClient(url).run(full, timeout=timeout)
+    """Fuehrt rohes CPGQL aus und importiert den CPG nur, wenn noch keiner geladen ist.
+
+    `importCpg` auf einen bereits geladenen CPG vergiftet die REPL dauerhaft: der
+    Import scheitert, und der Fehler-Renderer wirft dabei selbst eine
+    NullPointerException (`fansi.Str$.apply` <- `replpp.Rendering.renderError`).
+    Danach scheitert *jede* weitere Query, auch ohne Import. Ein unbedingter
+    Import-Prefix begrenzt den Server damit auf genau eine brauchbare Query pro
+    Start.
+
+    Eine Query ohne geladenen CPG scheitert dagegen sauber ("No projects loaded")
+    und laesst die REPL intakt -- deshalb erst fragen, dann bei Bedarf importieren.
+    Kostet einen zusaetzlichen Request im Kaltstart und keinen danach.
+    """
+    client = JoernClient(url)
+    res = client.run(cpgql, timeout=timeout)
+    if res.get("success") or _NO_CPG_LOADED not in str(res.get("error", "")):
+        return res
+    imported = client.run(f'importCpg("{cpg_path_in_container(codebase_hash)}")', timeout=timeout)
+    if not imported.get("success"):
+        return imported
+    return client.run(cpgql, timeout=timeout)
 
 
 # --- Navigations-Queries (gleiche Shape wie der tree-sitter-Gateway) ---
