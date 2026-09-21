@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from . import store
@@ -21,6 +21,46 @@ from .graph import Index
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 4243  # eigen: getrennt vom externen Codebadger-Server (4242)
+
+# --- MCP-Protokoll (Lifecycle: initialize / notifications/initialized / tools/list) ---
+#
+# Feldnamen und Formen (protocolVersion, capabilities, serverInfo, tools[].inputSchema,
+# JSON-RPC-Fehlercode -32601) stammen aus der MCP-Spezifikation
+# https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle und
+# .../server/tools (per Context7 abgerufen), Versionsverhandlung zusaetzlich
+# gegenspiegelt mit .../specification/2025-11-25/basic/lifecycle. Der Server
+# selbst implementiert die 2025-06-18-Form; bekannte protocolVersion-Werte des
+# Clients werden gespiegelt, sonst antworten wir mit unserer eigenen Version.
+SERVER_NAME = "lumos-code"  # == [project].name in pyproject.toml
+PREFERRED_PROTOCOL_VERSION = "2025-06-18"
+SUPPORTED_PROTOCOL_VERSIONS = (
+    "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25",
+)
+
+
+def _server_version() -> str:
+    """Version aus den Paket-Metadaten (== [project].version in pyproject.toml).
+
+    `uv sync`/`uv build` installieren das Paket lokal (editable bzw. Wheel);
+    `importlib.metadata` liest die Version dann direkt von dort, statt sie im
+    Code zu duplizieren. Fallback (Dev-Checkout ohne Install): pyproject.toml
+    selbst parsen.
+    """
+    try:
+        from importlib.metadata import version as _pkg_version
+        return _pkg_version("lumos-code")
+    except Exception:
+        pass
+    try:
+        import re
+        from pathlib import Path
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject.read_text())
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "0.0.0"
 
 
 def _ok(data: dict) -> str:
@@ -157,20 +197,119 @@ TOOLS: Dict[str, Callable[[dict], str]] = {
     "run_cpgql_query": tool_run_cpgql_query,
 }
 
+# inputSchema pro Tool, abgeleitet aus den Handler-Implementierungen oben (welche
+# Keys liest jeder Handler aus `arguments`, welche fehlen duerfen ohne Fehler zu
+# werfen). `required` listet nur Keys, ohne die der Handler tatsaechlich einen
+# Fehler zurueckgibt oder die Antwort sinnlos wird; Alias-Keys (z.B. `method`
+# statt `method_name`), die die Handler zusaetzlich akzeptieren, stehen nur in
+# der Beschreibung, nicht in `required` — falsch als Pflicht markiert waere
+# schlimmer als eine unvollstaendige Beschreibung.
+TOOL_SCHEMAS: Dict[str, dict] = {
+    "generate_cpg": {
+        "type": "object",
+        "properties": {
+            "source_path": {"type": "string", "description": "Pfad zum Quellverzeichnis (Legacy-Alias: path)"},
+            "language": {"type": "string", "description": "Sprache, z.B. php, javascript, typescript, python, java, go, ruby, csharp, swift, kotlin, c, cpp"},
+            "codebase_hash": {"type": "string", "description": "CPG-Hash; ohne Angabe wird sha1(abs(source_path))[:16] verwendet"},
+            "include_gitignored_files": {"type": "boolean", "default": False, "description": "Auch von .gitignore ausgeschlossene Dateien indexieren"},
+        },
+        "required": ["source_path", "language"],
+    },
+    "get_cpg_status": {
+        "type": "object",
+        "properties": {
+            "codebase_hash": {"type": "string", "description": "CPG-Hash aus lumos.yml (codebase_hash)"},
+        },
+        "required": ["codebase_hash"],
+    },
+    "find_methods": {
+        "type": "object",
+        "properties": {
+            "codebase_hash": {"type": "string", "description": "CPG-Hash aus lumos.yml"},
+            "pattern": {"type": "string", "description": "Regex ueber Methoden-/Klassennamen; leer = alle Methoden des CPG (Legacy-Alias: name)"},
+        },
+        "required": ["codebase_hash"],
+    },
+    "get_call_graph": {
+        "type": "object",
+        "properties": {
+            "codebase_hash": {"type": "string", "description": "CPG-Hash aus lumos.yml"},
+            "method_name": {"type": "string", "description": "Klasse.Methode oder Methodenname (Legacy-Alias: method)"},
+            "direction": {"type": "string", "enum": ["incoming", "outgoing"], "default": "incoming", "description": "incoming = Aufrufer (Impact/Blast-Radius), outgoing = Aufgerufenes"},
+            "depth": {"type": "integer", "minimum": 1, "default": 1, "description": "Rekursionstiefe"},
+        },
+        "required": ["codebase_hash", "method_name"],
+    },
+    "get_source": {
+        "type": "object",
+        "properties": {
+            "codebase_hash": {"type": "string", "description": "CPG-Hash aus lumos.yml"},
+            "method_name": {"type": "string", "description": "Klasse.Methode oder Methodenname (Legacy-Aliase: method, symbol)"},
+        },
+        "required": ["codebase_hash", "method_name"],
+    },
+    "get_context": {
+        "type": "object",
+        "properties": {
+            "codebase_hash": {"type": "string", "description": "CPG-Hash aus lumos.yml"},
+            "symbol": {"type": "string", "description": "Klasse.Methode oder Methodenname; liefert Source + Caller + Callee gebuendelt (Legacy-Alias: method_name)"},
+        },
+        "required": ["codebase_hash", "symbol"],
+    },
+    "run_cpgql_query": {
+        "type": "object",
+        "properties": {
+            "codebase_hash": {"type": "string", "description": "CPG-Hash aus lumos.yml; der zugehoerige CPG muss im Joern-Backend gebaut sein"},
+            "query": {"type": "string", "description": "Rohe CPGQL-Query, ausgefuehrt gegen den Joern-REST-Server (echtes Data-Flow/Taint moeglich)"},
+        },
+        "required": ["codebase_hash", "query"],
+    },
+}
+
+TOOL_DESCRIPTIONS: Dict[str, str] = {
+    "generate_cpg": "Baut den tree-sitter-CPG-Index fuer ein Quellverzeichnis (Aequivalent zu `lmc build`).",
+    "get_cpg_status": "Liefert Status/Groesse (Methoden, Kanten, Dateien) eines bereits gebauten CPG.",
+    "find_methods": "Findet Klassen/Methoden per Regex im CPG.",
+    "get_call_graph": "Blast-Radius/Aufrufgraph einer Methode (Aufrufer oder Aufgerufenes), rekursiv bis `depth`.",
+    "get_source": "Quelltext einer Methode inklusive Datei:Zeile.",
+    "get_context": "Buendelt Source + direkte Aufrufer + direkte Aufgerufene fuer eine Methode.",
+    "run_cpgql_query": "Fuehrt eine rohe Joern-CPGQL-Query gegen den gebauten CPG aus (Data-Flow/Taint, Escape-Hatch).",
+}
+
 
 def re_error():
     import re
     return re.error
 
 
-async def mcp(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}})
-    tool_name = body.get("method") == "tools/call" and body.get("params", {}).get("name")
-    arguments = body.get("params", {}).get("arguments", {}) or {}
-    req_id = body.get("id", 1)
+def _handle_initialize(params: dict, req_id) -> JSONResponse:
+    requested = params.get("protocolVersion")
+    protocol_version = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PREFERRED_PROTOCOL_VERSION
+    return JSONResponse({
+        "jsonrpc": "2.0", "id": req_id,
+        "result": {
+            "protocolVersion": protocol_version,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": SERVER_NAME, "version": _server_version()},
+        },
+    })
+
+
+def _handle_tools_list(req_id) -> JSONResponse:
+    tools = [
+        {
+            "name": name,
+            "description": TOOL_DESCRIPTIONS.get(name, ""),
+            "inputSchema": TOOL_SCHEMAS[name],
+        }
+        for name in TOOLS
+    ]
+    return JSONResponse({"jsonrpc": "2.0", "id": req_id, "result": {"tools": tools}})
+
+
+def _handle_tools_call(params: dict, req_id) -> JSONResponse:
+    tool_name = params.get("name")
+    arguments = params.get("arguments") or {}
     handler = TOOLS.get(tool_name)
     if handler is None:
         text = _err(f"Unbekanntes Tool: {tool_name}. Verfuegbar: {list(TOOLS)}")
@@ -182,6 +321,38 @@ async def mcp(request: Request) -> JSONResponse:
     return JSONResponse({
         "jsonrpc": "2.0", "id": req_id,
         "result": {"content": [{"type": "text", "text": text}]},
+    })
+
+
+async def mcp(request: Request) -> Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+                            status_code=400)
+
+    method = body.get("method")
+    params = body.get("params") or {}
+    if not isinstance(params, dict):
+        params = {}
+
+    # JSON-RPC 2.0: eine Notification hat KEIN "id"-Feld und bekommt NIE eine
+    # Antwort mit Ergebnis (nicht einmal einen Fehler) — nur eine Transport-
+    # Quittung. `notifications/initialized` ist die einzige, die der Client
+    # heute schickt; unbekannte Notifications werden ebenso still quittiert.
+    if "id" not in body:
+        return Response(status_code=202)
+
+    req_id = body.get("id")
+    if method == "initialize":
+        return _handle_initialize(params, req_id)
+    if method == "tools/list":
+        return _handle_tools_list(req_id)
+    if method == "tools/call":
+        return _handle_tools_call(params, req_id)
+    return JSONResponse({
+        "jsonrpc": "2.0", "id": req_id,
+        "error": {"code": -32601, "message": f"Method not found: {method}"},
     })
 
 
