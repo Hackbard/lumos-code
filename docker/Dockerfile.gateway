@@ -1,0 +1,18 @@
+# Lumos-Gateway: der MCP-Server + tree-sitter-CPG, den die Fabrik-Agents
+# ueber MCP fragen (lmc find / context / impact / check-diff). In-Prozess-
+# Engine — kein Daemon, kein Joern, kein Socket: ein Prozess, ein Port.
+#
+# Build aus dem Repo-Context (dist/ ist gitignored — das Wheel wird zur
+# Build-Zeit aus dem Quellbaum gebaut):
+#   docker build -f docker/Dockerfile.gateway -t <image> .
+#
+# Serve laeuft auf 0.0.0.0, damit Container auf factory-net das Gateway
+# als http://lumos:4243 erreichen (siehe infra/compose.lumos.yml).
+FROM python:3.12-slim
+
+# The lmc package from the source tree (hatchling); deps come from PyPI.
+COPY pyproject.toml README.md LICENSE ./
+COPY lmc ./lmc
+RUN pip install --no-cache-dir .
+
+CMD ["lmc", "serve", "--host", "0.0.0.0", "--port", "4243"]
