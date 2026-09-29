@@ -44,6 +44,11 @@ def check_diff(path: str, codebase_hash: Optional[str] = None,
     cbh = codebase_hash or _hash_from_path(root)
     client = CodebadgerClient(url)
     st = client.get_cpg_status(cbh)
+    # Gateway nicht erreichbar: nicht als "cpg_built=false" verschlucken —
+    # sonst meldet jeder Aufrufer munter "safe", obwohl gar nichts gecheckt
+    # wurde. Fehler weiterreichen, damit der Aufrufer heilen kann.
+    if st.get("success") is False:
+        return {"success": False, "error": st.get("error") or "CPG-Server nicht erreichbar"}
     cpg_built = bool((st.get("data") or {}).get("exists"))
 
     warnings: list = []
