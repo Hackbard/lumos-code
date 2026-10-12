@@ -55,11 +55,14 @@ def compute_blast_radius(
     read_paths: Set[str] = set()
     write_paths: Set[str] = set()
     affected_methods: List[str] = []
+    engine_used = "filename_glob"  # the last-resort fallback (step 3)
+    joern_available = bool(joern_mod) and joern_mod.JoernClient().is_up() if joern_mod else False
 
     # 1. Joern engine
-    if engine == "joern" and joern_mod:
+    if engine == "joern" and joern_available:
         jc = joern_mod.JoernClient()
         if jc.is_up():
+            engine_used = "joern"
             # Run CPG Reachability Traversal
             escaped_symbol = symbol.replace('"', '\\"')
             cpgql = (
@@ -86,6 +89,7 @@ def compute_blast_radius(
 
     # 2. Fallback or Tree-Sitter engine
     if not affected_methods and CodebadgerClient:
+        engine_used = "treesitter"
         try:
             client = CodebadgerClient(timeout=2.0)
             find_res = client.find_methods(cbh, f".*{symbol}.*")
@@ -131,7 +135,10 @@ def compute_blast_radius(
         "success": True,
         "target_sysml_ref": target_spec,
         "resolved_symbol": symbol,
-        "engine_used": engine,
+        "engine_requested": engine,
+        "engine_used": engine_used,
+        "engine_fallback": engine == "joern" and engine_used != "joern",
+        "joern_available": bool(joern_available),
         "depth": depth,
         "affected_methods": sorted(set(affected_methods)),
         "bounded_scope": {
